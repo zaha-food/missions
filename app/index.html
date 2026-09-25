@@ -205,22 +205,8 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 @keyframes pulse{0%,100%{background:#F6E5E3}50%{background:#EFC9C4}}
 .alertbar b{font-size:15px;font-weight:600;color:var(--fail)}
 .alertbar span{font-size:13px;font-weight:300;color:#6d6a65}
-.alertbar .cnt{margin-left:auto;background:var(--fail);color:#fff;border:none;
-  font-family:inherit;font-size:14px;font-weight:500;padding:11px 18px;cursor:pointer;
-  min-height:44px;flex:none}
-.latelist{flex:none;background:#fff;border-bottom:2px solid var(--fail);
-  max-height:46vh;overflow-y:auto;padding:12px 20px}
-.latelist .lgrp{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
-  color:#8a8681;margin:6px 0 7px}
-.laterow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
-  background:#fff;border:1px solid var(--mist);border-left:3px solid var(--fail);
-  padding:0 14px;height:52px;margin-bottom:6px;cursor:pointer;font-family:inherit}
-.laterow .lt{width:46px;flex:none;font-size:13px;font-weight:500;color:#5c5955;
-  font-variant-numeric:tabular-nums}
-.laterow .ln2{flex:1;font-size:15px;font-weight:400;min-width:0;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.laterow .lm{font-size:12px;font-weight:500;color:var(--fail);flex:none}
-/* a wall screen should never strobe at someone all day */
+.alertbar .atop{margin-left:auto;font-size:12px;font-weight:500;color:var(--fail);
+  letter-spacing:.04em}
 @media (prefers-reduced-motion:reduce){ .alertbar{animation:none} }
 
 /* due soon — amber, quiet, no drama */
@@ -247,6 +233,19 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .areaname.away{color:var(--clay)}
 .switchbtn{background:none;border:1px solid var(--stone);color:#6d6a65;font-size:13px;
   padding:10px 14px;cursor:pointer;font-family:inherit;flex:none;min-height:44px}
+/* Reporting a problem cannot live in a scrolling list — a broken fridge
+   is found at the worst moment. It sits in the bar, always on screen. */
+.probbtn{background:#fff;border:2px solid var(--fail);color:var(--fail);
+  font-size:14px;font-weight:600;padding:0 16px;height:44px;margin-right:9px;
+  cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:7px}
+.probbtn::before{content:'';width:9px;height:9px;border-radius:50%;background:var(--fail)}
+.probbtn:active{background:var(--fail);color:#fff}
+.probbtn:active::before{background:#fff}
+.pickw{padding:22px}
+.pickw h3{font-size:19px;font-weight:600;margin:0 0 4px}
+.pickw p{font-size:14px;font-weight:300;color:#5c5955;margin:0 0 16px}
+/* free text behind an "Other" option */
+.otherin{margin-top:9px}
 .viewbar{flex:none;display:flex;align-items:center;gap:12px;padding:10px 20px;
   background:var(--clay);color:#fff}
 .viewbar b{font-size:15px;font-weight:600}
@@ -341,6 +340,7 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
     </div>
     <div class="spacer"></div>
     <div class="sub" id="shiftname">—</div>
+    <button class="probbtn" id="probbtn" hidden>Report a problem</button>
     <button class="switchbtn" id="switchbtn">Other floor</button>
   </div>
 
@@ -348,7 +348,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
   <div class="viewbar" id="viewbar" hidden></div>
   <div class="netstate" id="netstate" hidden></div>
   <div class="alertbar" id="alertbar" hidden></div>
-  <div class="latelist" id="latelist" hidden></div>
   <div class="cols" id="cols"></div>
 
   <div class="rem" id="rembar">
@@ -365,6 +364,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

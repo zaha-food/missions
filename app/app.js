@@ -273,8 +273,17 @@ function render() {
   const cols = $('cols');
   cols.innerHTML = '';
 
+  // Reporting a problem is not a scheduled job and never "completes", so
+  // it does not belong in a column or in the day's count. It sits in the bar.
+  const inc = STATE.occ.filter(o => o.checks.kind === 'incident' && o.status === 'pending');
+  const pb = $('probbtn');
+  if (pb) {
+    pb.hidden = !inc.length;
+    pb.onclick = () => inc.length === 1 ? openCheck(inc[0]) : pickIncident(inc);
+  }
+
   STATE.stations.forEach(st => {
-    const mine  = STATE.occ.filter(o => o.station_id === st.id);
+    const mine  = STATE.occ.filter(o => o.station_id === st.id && o.checks.kind !== 'incident');
     const open  = mine.filter(o => o.status === 'pending');
     const shut  = mine.filter(o => o.status !== 'pending');
     const u     = o => urgency(o, now);
@@ -345,45 +354,38 @@ function render() {
   // when everything outstanding is late, dimming communicates nothing
   cols.classList.toggle('allLate', lates.length > 0 && lates.length === pending.length);
 
+  // Every overdue mission is already at the top of its own column, in red.
+  // A second expandable list of the same rows was duplication that ate the
+  // space the board needs — the bar is now just the glance-from-across-the-
+  // room count, and the answer to "which ones?" is the board itself.
   const bar = $('alertbar');
   if (lates.length) {
     const worst = lates[0];
     const mins = Math.round((now - new Date(worst.due_at)) / 60000);
     const station = STATE.stations.find(s => s.id === worst.station_id);
     bar.innerHTML = `<b>${lates.length} overdue</b>
-      <span>Oldest: ${esc(worst.checks.name)} · ${esc(station ? station.name : '')} · ${mins} min late</span>
-      <button class="cnt">${SHOW_LATE ? 'Hide list' : 'Show all ' + lates.length}</button>`;
-    bar.querySelector('.cnt').onclick = () => { SHOW_LATE = !SHOW_LATE; render(); };
+      <span>Oldest: ${esc(worst.checks.name)} · ${esc(station ? station.name : '')} ·
+        ${mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + ' min'} late</span>
+      <span class="atop">At the top of the list, in red</span>`;
     bar.hidden = false;
-    drawLateList(lates, now);
-  } else { bar.hidden = true; $('latelist').hidden = true; }
+  } else bar.hidden = true;
 }
 
-/* Which ones? Every overdue mission, grouped by station, each one tappable.
-   The bar catches the eye; this answers the question it raises. */
-let SHOW_LATE = false;
-
-function drawLateList(lates, now) {
-  const box = $('latelist');
-  if (!SHOW_LATE) { box.hidden = true; return; }
-  box.innerHTML = '';
-  STATE.stations.forEach(st => {
-    const mine = lates.filter(o => o.station_id === st.id);
-    if (!mine.length) return;
-    box.insertAdjacentHTML('beforeend',
-      `<div class="lgrp">${esc(st.name)} — ${mine.length} overdue</div>`);
-    mine.forEach(o => {
-      const mins = Math.round((now - new Date(o.due_at)) / 60000);
-      const b = document.createElement('button');
-      b.className = 'laterow';
-      b.innerHTML = `<span class="lt">${hhmm(o.due_at)}</span>
-        <span class="ln2">${esc(o.checks.name)}</span>
-        <span class="lm">${mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + ' min'} late</span>`;
-      b.onclick = () => { SHOW_LATE = false; openCheck(o); };
-      box.appendChild(b);
-    });
-  });
-  box.hidden = false;
+/* more than one incident form set up — ask which side it happened on */
+function pickIncident(list) {
+  sheet().classList.add('open');
+  panel().innerHTML = `<div class="pickw">
+      <h3>Report a problem</h3>
+      <p>Which side did it happen on?</p>
+      ${list.map(o => {
+        const st = STATE.stations.find(x => x.id === o.station_id);
+        return `<button class="row2 now" data-i="${o.id}">
+          <span class="n2">${esc(st ? st.name : o.checks.name)}</span>
+          <span class="go2">Report</span></button>`;
+      }).join('')}
+    </div>`;
+  panel().querySelectorAll('[data-i]').forEach(b => b.onclick = () =>
+    openCheck(list.find(o => o.id === b.dataset.i)));
 }
 
 /* ------------------------------------------------------------ open a job */
@@ -733,63 +735,127 @@ function corrective(fails, i, sub) {
     staff:            'you said',
     unknown:          'not known'
   }[f.started_basis] || '';
-  let food = '', qty = '', act = '', override = null;
+
+  /* Does the reading name a food, or a cupboard?
+     "Lamb 58°C" already answers "which food" — asking again, and offering
+     Dairy and Prepped salads, insults the person holding the probe.
+     "Walk-in chiller 12°C" genuinely does not: a chiller holds twenty
+     things and the law wants to know which of them were at risk. */
+  const unit    = (JOB && JOB.items || []).find(x => x.name === f.unit) || {};
+  const store   = /storage|chiller|freez|fridge|ambient/i.test(unit.basis || f.unit || '');
+  const cooking = /cooking|calibrat|probe|core/i.test(unit.basis || f.unit || '');
+  const knowsFood = !store && !cooking;          // the unit IS the food
+
+  const FOODS = store
+    ? ['Everything in it', 'Prepped salads', 'Dairy', 'Raw meat', 'Cooked food']
+    : [];
+  const ACTS = ['Binned it', 'Moved to another unit', 'Reheated', 'Called engineer'];
+
+  let food = knowsFood ? f.unit : '', qty = '', act = '', override = null;
+  let foodOther = false, actOther = false;
 
   const draw = () => {
+    const ready = food.trim() && act.trim();
     panel().innerHTML = `
       <div class="alert">
         <div class="alertt">${esc(f.unit)} is out of range — ${f.value}°C</div>
         <div class="alerts">Limit is ${f.limit}°C. This has to be recorded before you carry on.</div>
       </div>
       <div class="pbody">
-        <p class="calead">The law needs six things. <b>We already know four.</b></p>
+        <p class="calead">The law needs six things.
+          <b>We already know ${knowsFood ? 'five' : 'four'}.</b></p>
         <div class="known">
           <div><span>When it started</span><b>${started ? esc(started) : 'Not known'}</b>
             <i>${esc(basis)}</i><button class="tiny" id="fix">Change</button></div>
           <div><span>How far out</span><b>${Math.abs(f.value - f.limit).toFixed(1)}°C ${f.limit_kind === 'min' ? 'below' : 'above'}</b></div>
           <div><span>Who found it</span><b>${esc(sub.signed_by)}</b><i>just now</i></div>
           <div><span>Back to normal</span><b>Re-check in 30 minutes</b></div>
+          ${knowsFood ? `<div><span>Which food</span><b>${esc(f.unit)}</b>
+            <i>this is what you probed</i><button class="tiny" id="notit">Not that</button></div>` : ''}
         </div>
-        <div class="ask"><span class="asklab">What food, and how much?</span>
-          <div class="opts" id="foods">
-            ${['Prepped salads', 'Dairy', 'Raw meat', esc(f.unit)].map(x =>
-              `<button class="opt ${food === x ? 'on' : ''}" data-f="${esc(x)}">${esc(x)}</button>`).join('')}
-          </div>
-          <input class="inp" id="qty" placeholder="How much? e.g. one full tray" value="${esc(qty)}">
+
+        ${knowsFood ? '' : `
+        <div class="ask"><span class="asklab">${store
+            ? 'What food was in there?'
+            : 'Which food was this?'}</span>
+          ${FOODS.length ? `<div class="opts" id="foods">
+            ${FOODS.map(x => `<button class="opt ${food === x && !foodOther ? 'on' : ''}"
+                data-f="${esc(x)}">${esc(x)}</button>`).join('')}
+            <button class="opt ${foodOther ? 'on' : ''}" data-fo="1">Something else</button>
+          </div>` : ''}
+          ${(foodOther || !FOODS.length)
+            ? `<input class="inp otherin" id="foodtx" placeholder="Which food? e.g. lamb kofte"
+                 value="${esc(foodOther || !FOODS.length ? food : '')}">` : ''}
+        </div>`}
+
+        <div class="ask"><span class="asklab">How much?</span>
+          <input class="inp" id="qty" placeholder="e.g. one full tray, about 4kg" value="${esc(qty)}">
         </div>
+
         <div class="ask"><span class="asklab">What did you do?</span>
           <div class="opts" id="acts">
-            ${['Binned it', 'Moved to another unit', 'Reheated', 'Called engineer'].map(x =>
-              `<button class="opt ${act === x ? 'on' : ''}" data-a="${esc(x)}">${esc(x)}</button>`).join('')}
+            ${ACTS.map(x => `<button class="opt ${act === x && !actOther ? 'on' : ''}"
+                data-a="${esc(x)}">${esc(x)}</button>`).join('')}
+            <button class="opt ${actOther ? 'on' : ''}" data-ao="1">Something else</button>
           </div>
+          ${actOther ? `<input class="inp otherin" id="acttx"
+              placeholder="What did you do? Write it in your own words" value="${esc(act)}">` : ''}
         </div>
       </div>
       <div class="pfoot">
-        <button class="signbtn ${food && act ? '' : 'off'}" ${food && act ? '' : 'disabled'}>
-          ${food && act ? 'Save record with your PIN' : 'Answer both questions'}
+        <button class="signbtn ${ready ? '' : 'off'}" ${ready ? '' : 'disabled'}>
+          ${ready ? 'Save record with your PIN'
+            : !food.trim() ? 'Say which food' : 'Say what you did'}
         </button>
       </div>`;
-    panel().querySelectorAll('[data-f]').forEach(b => b.onclick = () => { food = b.dataset.f; draw(); });
-    panel().querySelectorAll('[data-a]').forEach(b => b.onclick = () => { act = b.dataset.a; draw(); });
-    panel().querySelector('#qty').oninput = e => qty = e.target.value;
+
+    panel().querySelectorAll('[data-f]').forEach(b => b.onclick = () => {
+      food = b.dataset.f; foodOther = false; draw(); });
+    panel().querySelectorAll('[data-fo]').forEach(b => b.onclick = () => {
+      foodOther = true; food = ''; draw(); panel().querySelector('#foodtx').focus(); });
+    panel().querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+      act = b.dataset.a; actOther = false; draw(); });
+    panel().querySelectorAll('[data-ao]').forEach(b => b.onclick = () => {
+      actOther = true; act = ''; draw(); panel().querySelector('#acttx').focus(); });
+
+    // typing must not redraw — that would steal the keyboard on every key
+    const bind = (id, set) => { const el = panel().querySelector(id); if (el) el.oninput = e => {
+      set(e.target.value);
+      const btn = panel().querySelector('.signbtn');
+      const ok = food.trim() && act.trim();
+      btn.classList.toggle('off', !ok); btn.disabled = !ok;
+      btn.textContent = ok ? 'Save record with your PIN'
+        : !food.trim() ? 'Say which food' : 'Say what you did';
+      btn.onclick = ok ? save : null;
+    }; };
+    bind('#qty',    v => qty = v);
+    bind('#foodtx', v => food = v);
+    bind('#acttx',  v => act = v);
+
+    const nt = $('notit');
+    if (nt) nt.onclick = () => { food = ''; foodOther = true; draw(); };
+
     $('fix').onclick = () => {
       const t = prompt('When was it last definitely fine? e.g. 13:00', '');
       if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return;
       const d = new Date(); const [h, m] = t.split(':');
       d.setHours(+h, +m, 0, 0); override = d.toISOString(); draw();
     };
-    const s = panel().querySelector('.signbtn:not(.off)');
-    if (s) s.onclick = () => askPin(async pin => {
-      const { data, error } = await db.rpc('submit_corrective', {
-        p_pin: pin, p_reading: f.reading_id, p_food: food,
-        p_quantity: qty || 'not stated', p_action: act, p_started_at: override
-      });
-      if (error) return { error: error.message };
-      if (!data.ok) return { error: data.error };
-      if (i + 1 < fails.length) { corrective(fails, i + 1, sub); return; }
-      closeSheet(); celebrate(sub, true);
-    });
+    const sgn = panel().querySelector('.signbtn:not(.off)');
+    if (sgn) sgn.onclick = save;
   };
+
+  const save = () => askPin(async pin => {
+    const { data, error } = await db.rpc('submit_corrective', {
+      p_pin: pin, p_reading: f.reading_id, p_food: food.trim(),
+      p_quantity: qty.trim() || 'not stated', p_action: act.trim(), p_started_at: override
+    });
+    if (error) return { error: error.message };
+    if (!data.ok) return { error: data.error };
+    if (i + 1 < fails.length) { corrective(fails, i + 1, sub); return; }
+    closeSheet(); celebrate(sub, true);
+  });
+
   draw();
 }
 
