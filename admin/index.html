@@ -159,6 +159,17 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
   padding:9px 13px;font-variant-numeric:tabular-nums}
 .code.used{background:var(--mist);color:#b5b1ab;text-decoration:line-through;font-weight:300}
 .devbar{display:flex;gap:9px;margin-top:14px;flex-wrap:wrap;align-items:center}
+.act{display:flex;align-items:flex-start;gap:14px;background:#fff;border:1px solid var(--mist);
+  padding:12px 16px;margin-bottom:5px}
+.act.bad{border-left:3px solid var(--fail)}
+.act.note{border-left:3px solid var(--warn)}
+.actt{width:112px;flex:none;font-size:12px;font-weight:300;color:#8a8681;font-variant-numeric:tabular-nums}
+.actv{width:150px;flex:none;font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:500}
+.actd{flex:1;min-width:0;font-size:14px;font-weight:300;color:#3f3c39}
+.acta{font-size:12px;font-weight:300;color:#8a8681;flex:none}
+.daysep{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8a8681;
+  margin:24px 0 9px;display:flex;align-items:center;gap:10px}
+.daysep .ln{flex:1;height:1px;background:var(--mist)}
 .hide{display:none !important}
 </style>
 </head>
@@ -188,6 +199,7 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
     <button class="nav" data-view="checks">Checks</button>
     <button class="nav" data-view="people">People</button>
     <button class="nav" data-view="devices">Devices</button>
+    <button class="nav" data-view="activity">Activity</button>
     <div class="who">Signed in as <b id="me">—</b><br><button id="out">Sign out</button></div>
   </div>
   <div class="main" id="main"></div>

@@ -57,6 +57,7 @@ function route() {
   if (VIEW === 'checks') return viewChecks();
   if (VIEW === 'people') return viewPeople();
   if (VIEW === 'devices') return viewDevices();
+  if (VIEW === 'activity') return viewActivity();
 }
 
 /* ---------------------------------------------------------------- today */
@@ -344,7 +345,10 @@ async function viewChecks() {
 
   let html = `<h1>Checks</h1>
     <p class="sub">Everything the iPad can show. Editing a live check creates a new version, so past records never change.</p>
-    <div class="bar"><button class="btn cta" id="new">+ New check</button></div>`;
+    <div class="bar">
+      <button class="btn cta" id="new">+ New check</button>
+      <button class="btn" id="paper">Print paper backup</button>
+    </div>`;
 
   STATIONS.forEach(st => {
     const mine = (checks || []).filter(c => c.station_id === st.id);
@@ -363,6 +367,7 @@ async function viewChecks() {
   });
   m.innerHTML = html;
   $('new').onclick = () => builder(null);
+  $('paper').onclick = () => printPaperBackup(checks);
   m.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => builder(b.dataset.edit));
 }
 
@@ -1006,4 +1011,153 @@ function printCard(d, codes) {
       the back office from anywhere.</p>
    <p>If the screen still will not start, <b>use the paper log</b> and tell a manager.</p>`);
   w.document.close(); w.print();
+}
+
+/* ============================================================== activity */
+
+const VERBS = {
+  record_signed:        ['Check signed',        ''],
+  reading_failed:       ['Reading failed',      'bad'],
+  corrective_recorded:  ['Corrective action',   'bad'],
+  pin_issued:           ['PIN issued',          'note'],
+  pin_revoked:          ['PIN revoked',         'note'],
+  device_paired:        ['Device paired',       'note'],
+  device_paired_EXTRA:  ['Extra device paired', 'bad'],
+  device_revoked:       ['Device unlinked',     'note'],
+  device_codes_issued:  ['New setup codes',     'note']
+};
+let ACT_FILTER = 'all';
+
+async function viewActivity() {
+  const m = $('main');
+  m.innerHTML = `<h1>Activity</h1><p class="sub">Loading…</p>`;
+
+  const { data, error } = await db.from('ops_activity')
+    .select('id,ts,actor,verb,detail,staff(name)')
+    .order('ts', { ascending: false }).limit(300);
+  if (error) return m.innerHTML = `<h1>Activity</h1><div class="empty">${esc(error.message)}</div>`;
+
+  const rows = (data || []).filter(r =>
+    ACT_FILTER === 'all' ? true
+    : ACT_FILTER === 'security' ? /pin_|device_/.test(r.verb)
+    : /failed|corrective/.test(r.verb));
+
+  let html = `<h1>Activity</h1>
+    <p class="sub">Everything the system has recorded — who did what, and when.
+       Nothing here can be edited or deleted.</p>
+    <div class="bar">
+      ${[['all','Everything'],['problems','Failures only'],['security','PINs & devices']]
+        .map(([v,l]) => `<button class="btn ${ACT_FILTER===v?'on':''}" data-f="${v}">${l}</button>`).join('')}
+    </div>`;
+
+  if (!rows.length) html += `<div class="empty">Nothing recorded yet.</div>`;
+
+  let day = '';
+  rows.forEach(r => {
+    const d = new Date(fixIso(r.ts)).toLocaleDateString('en-GB',
+      { weekday:'long', day:'numeric', month:'long', timeZone: TZ });
+    if (d !== day) { day = d; html += `<div class="daysep">${esc(d)}<span class="ln"></span></div>`; }
+    const [label, cls] = VERBS[r.verb] || [r.verb.replace(/_/g,' '), ''];
+    html += `<div class="act ${cls}">
+      <span class="actt">${hhmm(r.ts)}</span>
+      <span class="actv" style="${cls==='bad'?'color:var(--fail)':cls==='note'?'color:var(--warn)':'color:#6d6a65'}">${esc(label)}</span>
+      <span class="actd">${esc(r.detail || r.staff?.name || '')}</span>
+      <span class="acta">${esc(r.actor || '')}</span>
+    </div>`;
+  });
+
+  m.innerHTML = html;
+  m.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { ACT_FILTER = b.dataset.f; viewActivity(); });
+}
+
+/* ========================================================= paper backup
+   When a screen will not start, the law does not pause. This prints a
+   blank log built from the checks that actually exist, so the fallback
+   matches the system instead of being a generic form. */
+
+async function printPaperBackup(checks) {
+  const live = (checks || []).filter(c => !c.archived_at);
+  const ids = live.map(c => (c.check_versions || []).find(v => v.status === 'live')?.id).filter(Boolean);
+
+  const [steps, units, items] = await Promise.all([
+    db.from('steps').select('check_version_id,sort,text,photo_required').in('check_version_id', ids).order('sort'),
+    db.from('units').select('check_version_id,sort,name,limit_kind,limit_c').in('check_version_id', ids).order('sort'),
+    db.from('count_items').select('check_version_id,sort,name,reorder_level,unit_label').in('check_version_id', ids).order('sort')
+  ]);
+  const by = (arr, vid) => (arr.data || []).filter(x => x.check_version_id === vid);
+
+  const byStation = {};
+  live.forEach(c => {
+    const st = STATIONS.find(s => s.id === c.station_id);
+    const k = st ? st.name : 'Other';
+    (byStation[k] = byStation[k] || []).push(c);
+  });
+
+  let body = '';
+  Object.keys(byStation).forEach(stn => {
+    body += `<h2>${esc(stn)}</h2>`;
+    byStation[stn]
+      .filter(c => c.kind !== 'reminder' && c.kind !== 'incident')
+      .sort((a, b) => {
+        const sa = (a.schedules || [])[0], sb = (b.schedules || [])[0];
+        return ((sa?.window_end || sa?.times?.[0] || '99') + '')
+             .localeCompare((sb?.window_end || sb?.times?.[0] || '99') + '');
+      })
+      .forEach(c => {
+        const v = (c.check_versions || []).find(x => x.status === 'live');
+        if (!v) return;
+        body += `<div class="chk"><div class="ch"><b>${esc(c.name)}</b>
+          <span>${esc(scheduleWords((c.schedules || [])[0]))}</span></div><table>`;
+        if (c.kind === 'temperature') {
+          body += `<tr class="hd"><th>Item</th><th>Must be</th><th>Reading °C</th><th>Time</th><th>Initials</th></tr>`;
+          by(units, v.id).forEach(u => body += `<tr><td>${esc(u.name)}</td>
+            <td class="sm">${u.limit_kind === 'min' ? 'min' : 'max'} ${u.limit_c}°C</td>
+            <td class="box"></td><td class="box"></td><td class="box"></td></tr>`);
+        } else if (c.kind === 'count') {
+          body += `<tr class="hd"><th>Item</th><th>Order below</th><th>Counted</th><th>Time</th><th>Initials</th></tr>`;
+          by(items, v.id).forEach(i => body += `<tr><td>${esc(i.name)}</td>
+            <td class="sm">${i.reorder_level ?? ''} ${esc(i.unit_label || '')}</td>
+            <td class="box"></td><td class="box"></td><td class="box"></td></tr>`);
+        } else {
+          body += `<tr class="hd"><th>Step</th><th>Done</th><th>Time</th><th>Initials</th></tr>`;
+          by(steps, v.id).forEach(s2 => body += `<tr><td>${esc(s2.text)}${
+            s2.photo_required ? ' <i>(photo needed — take one on a phone)</i>' : ''}</td>
+            <td class="box"></td><td class="box"></td><td class="box"></td></tr>`);
+        }
+        body += `</table></div>`;
+      });
+  });
+
+  const w = window.open('', '_blank');
+  w.document.write(`<title>Paper backup — Zaha Missions</title><style>
+    @page{size:A4;margin:14mm}
+    body{font-family:Helvetica,Arial,sans-serif;color:#222;font-size:11px;margin:0}
+    h1{font-size:19px;margin:0 0 2px}
+    .lead{font-size:11px;color:#666;margin:0 0 4px}
+    .warn{border:2px solid #9B2C20;color:#9B2C20;padding:8px 11px;font-size:11px;margin:10px 0 16px;line-height:1.5}
+    .dt{border:1px solid #999;padding:7px 11px;margin:0 0 16px;font-size:12px}
+    h2{font-size:13px;text-transform:uppercase;letter-spacing:.1em;margin:18px 0 8px;
+       border-bottom:2px solid #222;padding-bottom:4px}
+    .chk{break-inside:avoid;margin:0 0 13px}
+    .ch{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+    .ch b{font-size:12px}.ch span{font-size:10px;color:#777}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #bbb;padding:5px 7px;text-align:left;font-weight:400}
+    tr.hd th{background:#eee;font-size:10px;text-transform:uppercase;letter-spacing:.07em}
+    td.box{width:74px;height:22px}
+    td.sm{width:88px;color:#666;font-size:10px}
+    i{color:#777;font-size:10px}
+    </style>
+    <h1>Paper backup — Holborn</h1>
+    <p class="lead">Use this only when the screens are not working.</p>
+    <div class="warn"><b>Recording does not stop when a screen does.</b>
+      Fill this in as you go, sign each line with your initials, and hand it to a
+      manager at the end of the shift so it can be entered and filed. Photos:
+      take them on a phone and send them to your manager the same day.</div>
+    <div class="dt"><b>Date:</b> ________________ &nbsp;&nbsp;
+      <b>On shift:</b> ______________________________ &nbsp;&nbsp;
+      <b>Why paper:</b> ______________________________</div>
+    ${body}`);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
 }
