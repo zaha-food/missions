@@ -603,6 +603,10 @@ function keypad(unitId) {
 
 /* ----------------------------------------------------------- PIN + send */
 
+/* Four digits while testing. Change PIN_LENGTH back to 6 — and add a
+   lockout — before this carries real records. */
+const PIN_LENGTH = 4;
+
 function askPin(onDone) {
   let buf = '';
   const ov = document.createElement('div');
@@ -611,8 +615,8 @@ function askPin(onDone) {
     ov.innerHTML = `<div class="pad pin">
       <div class="padh">
         <div class="padlim">Who is signing this off?</div>
-        <div class="padname">Enter your 6-digit PIN</div>
-        <div class="dots">${[0, 1, 2, 3, 4, 5].map(i =>
+        <div class="padname">Enter your ${PIN_LENGTH}-digit PIN</div>
+        <div class="dots">${Array.from({length: PIN_LENGTH}, (_, i) => i).map(i =>
           `<span class="dot2 ${i < buf.length ? 'on' : ''}"></span>`).join('')}</div>
         ${err ? `<div class="verdict fail">${esc(err)}</div>` : ''}
       </div>
@@ -626,9 +630,9 @@ function askPin(onDone) {
       const k = b.dataset.k;
       if (k === 'cancel') return ov.remove();
       if (k === 'del') { buf = buf.slice(0, -1); return draw(); }
-      if (buf.length >= 6) return;
+      if (buf.length >= PIN_LENGTH) return;
       buf += k; draw();
-      if (buf.length === 6) {
+      if (buf.length === PIN_LENGTH) {
         ov.querySelector('.padh').innerHTML = '<div class="padname">Checking…</div>';
         const res = onDone ? await onDone(buf) : await submit(buf);
         if (res && res.error) { buf = ''; draw(res.error); }
