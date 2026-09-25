@@ -4,7 +4,26 @@ console.log('MISSIONS BUILD v3 — floor picker + switcher');
    except through submit_check(), which refuses to act without a PIN. */
 
 const TZ = 'Europe/London';
-const db = supabase.createClient(window.MISSIONS.url, window.MISSIONS.key);
+
+/* This screen must be paired before it can read anything. The key it
+   receives travels on every request; without it the database returns
+   nothing, so the address alone gives away no part of the operation. */
+const TOKEN_KEY = 'missions_device_token';
+const AREA_KEY  = 'missions_device_area';
+const getTok = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const setTok = t => { try { localStorage.setItem(TOKEN_KEY, t); } catch {} };
+const clearTok = () => { try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(AREA_KEY); } catch {} };
+
+const makeClient = token => supabase.createClient(window.MISSIONS.url, window.MISSIONS.key,
+  token ? { global: { headers: { 'x-device-token': token } } } : undefined);
+let db = makeClient(getTok());
+
+/* The iPad's own clock decides what time a record claims to be. A screen
+   twenty minutes out would file wrong legal times, so we anchor to the
+   server and correct for the difference. */
+let CLOCK_OFFSET = 0;              // ms to add to this device's clock
+let CLOCK_ANCHORED = false;
+const serverNow = () => new Date(Date.now() + CLOCK_OFFSET);
 
 const hhmm = iso => iso ? new Date(iso).toLocaleTimeString('en-GB',
   { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—';
@@ -34,15 +53,69 @@ const setHomeArea = id => { try { localStorage.setItem(HOME_KEY, id); } catch {}
 let VIEWING = null;
 let REVERT_AT = 0;
 
-function pickFloor(areas) {
+function pairScreen(err) {
   $('msg').classList.remove('hide');
-  $('msg').innerHTML = `<h2>Which floor is this iPad?</h2>
-    <p>Chosen once. It remembers, and always returns here.</p>
-    <div class="floorpick">${areas.map(a =>
-      `<button class="bigbtn" data-a="${a.id}">${esc(a.name)}</button>`).join('')}</div>`;
-  $('msg').querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
-    setHomeArea(b.dataset.a); VIEWING = null; load();
-  });
+  $('msg').innerHTML = `<h2>Set up this screen</h2>
+    <p>Type the next unused code from the card kept with this iPad.
+       Each code works once — cross it off after you use it.</p>
+    ${err ? `<div class="pairerr">${esc(err)}</div>` : ''}
+    <input class="paircode" id="pc" placeholder="XXXXXXXX" maxlength="8"
+           autocapitalize="characters" autocomplete="off" spellcheck="false">
+    <button class="bigbtn" id="pairgo">Set up</button>
+    <p class="pairhelp">No codes left? A manager can issue more from the back
+       office, wherever they are. If the screen still will not start, use the
+       paper log and tell a manager.</p>`;
+  const go = async () => {
+    const code = ($('pc').value || '').trim().toUpperCase();
+    if (code.length < 4) return;
+    $('pairgo').textContent = 'Checking…';
+    try {
+      const probe = makeClient(null);
+      const { data, error } = await probe.rpc('pair_device',
+        { p_code: code, p_agent: navigator.userAgent });
+      if (error) return pairScreen(error.message);
+      if (!data.ok) return pairScreen(data.error);
+      setTok(data.token);
+      try { localStorage.setItem(AREA_KEY, data.area_id); } catch {}
+      setHomeArea(data.area_id);
+      db = makeClient(data.token);
+      VIEWING = null;
+      await pingDevice();
+      load();
+    } catch (e) { pairScreen('Could not reach the system. Check the wifi.'); }
+  };
+  $('pairgo').onclick = go;
+  $('pc').onkeydown = e => { if (e.key === 'Enter') go(); };
+  $('pc').focus();
+}
+
+/* Checks in, corrects the clock, and learns if this screen has been
+   revoked from the back office. */
+async function pingDevice() {
+  const t = getTok(); if (!t) return;
+  try {
+    const sent = Date.now();
+    const { data, error } = await db.rpc('ping_device', { p_token: t });
+    if (error || !data) return;
+    if (data.revoked) {
+      clearTok();
+      db = makeClient(null);
+      return pairScreen('This screen has been unlinked by a manager. Enter a new code.');
+    }
+    if (data.server_time) {
+      const rtt = (Date.now() - sent) / 2;
+      CLOCK_OFFSET = new Date(data.server_time).getTime() + rtt - Date.now();
+      CLOCK_ANCHORED = true;
+      const drift = Math.abs(CLOCK_OFFSET);
+      const el = $('clockwarn');
+      if (el) {
+        if (drift > 120000) {
+          el.textContent = `This iPad's clock is ${Math.round(drift/60000)} min out — times are being corrected automatically`;
+          el.hidden = false;
+        } else el.hidden = true;
+      }
+    }
+  } catch {}
 }
 
 function backHome() { VIEWING = null; REVERT_AT = 0; load(); }
@@ -57,6 +130,8 @@ function switchFloor() {
 }
 
 async function load() {
+  if (!getTok()) return pairScreen();
+
   const { data: areas, error: e1 } = await db.from('areas')
     .select('id,name,sort,stations(id,name,sort),shifts(id,name,starts,ends,sort)')
     .order('sort');
@@ -64,9 +139,18 @@ async function load() {
     if (await loadCached()) { refreshQueueBadge(); return; }
     return fail('Could not reach the database', e1.message);
   }
-  if (!areas?.length) return fail('No areas set up', 'Nothing to show.');
+  // a paired screen always sees areas. Nothing back means the link was
+  // revoked or the data is gone — send it round to pairing again.
+  if (!areas?.length) {
+    if (await loadCached()) { refreshQueueBadge(); return; }
+    clearTok(); db = makeClient(null);
+    return pairScreen('This screen is no longer linked. Enter a code from the card.');
+  }
   STATE.areas = areas;
-  if (!homeArea() || !areas.some(a => a.id === homeArea())) return pickFloor(areas);
+  if (!homeArea() || !areas.some(a => a.id === homeArea())) {
+    let a = null; try { a = localStorage.getItem(AREA_KEY); } catch {}
+    setHomeArea(a && areas.some(x => x.id === a) ? a : areas[0].id);
+  }
 
   const area = areas.find(a => a.id === (VIEWING || homeArea()));
   STATE.area = area;
@@ -574,7 +658,7 @@ async function submit(pin) {
   }
   // when it ACTUALLY happened. Survives a late sync — the server keeps
   // both this and its own arrival time.
-  args.p_recorded_at = new Date().toISOString();
+  args.p_recorded_at = serverNow().toISOString();
 
   if (!navigator.onLine) {
     await queueSubmission(args, JOB.pendingPhotos || []);
@@ -982,5 +1066,7 @@ async function flushQueue() {
 }
 
 setInterval(flushQueue, 30000);
+setInterval(pingDevice, 180000);     // every 3 min: last seen, clock, revocation
+pingDevice();
 refreshQueueBadge();
 flushQueue();

@@ -56,6 +56,7 @@ function route() {
   if (VIEW === 'records') return viewRecords();
   if (VIEW === 'checks') return viewChecks();
   if (VIEW === 'people') return viewPeople();
+  if (VIEW === 'devices') return viewDevices();
 }
 
 /* ---------------------------------------------------------------- today */
@@ -856,5 +857,131 @@ function printSlip(name, pin) {
     <div class="p">${pin.slice(0,3)} ${pin.slice(3)}</div>
     <small>Keep this private. It is your signature on a legal record.<br>
     Lost it? A manager can issue a new one.</small>`);
+  w.document.close(); w.print();
+}
+
+/* =============================================================== devices */
+
+async function viewDevices() {
+  const m = $('main');
+  m.innerHTML = `<h1>Devices</h1><p class="sub">Loading…</p>`;
+
+  const { data: devs, error } = await db.from('devices')
+    .select(`id,name,active,last_seen,areas(name,sort),
+             device_links(id,user_agent,paired_at,last_seen,active,revoked_at,revoked_by),
+             device_codes(id,code,created_at,used_at,voided_at)`)
+    .eq('active', true);
+  if (error) return m.innerHTML = `<h1>Devices</h1><div class="empty">${esc(error.message)}</div>`;
+
+  devs.sort((a,b) => (a.areas?.sort ?? 0) - (b.areas?.sort ?? 0));
+  const mins = t => t ? Math.round((Date.now() - new Date(fixIso(t))) / 60000) : null;
+
+  let html = `<h1>Devices</h1>
+    <p class="sub">Every screen, who is linked to it, and how to get a screen
+       running again — all from here, wherever you are.</p>`;
+
+  devs.forEach(d => {
+    const live = (d.device_links || []).filter(l => l.active);
+    const spare = (d.device_codes || []).filter(c => !c.used_at && !c.voided_at);
+    const used = (d.device_codes || []).filter(c => c.used_at).slice(-3);
+    const extra = live.length > 1;
+    const quiet = live.length && live.every(l => (mins(l.last_seen) ?? 9999) > 30);
+
+    html += `<div class="dev ${extra || !live.length || quiet ? 'warn' : ''}">
+      <div class="devhead">
+        <span class="devname">${esc(d.name)}</span>
+        <span class="devarea">${esc(d.areas?.name || '')}</span>
+        <span style="margin-left:auto">${
+          !live.length ? '<span class="chip warn">Not linked</span>'
+          : extra ? `<span class="chip fail">⚠ ${live.length} devices linked</span>`
+          : quiet ? '<span class="chip warn">Not checked in recently</span>'
+          : '<span class="chip pass">Linked and live</span>'}</span>
+      </div>`;
+
+    if (!live.length) {
+      html += `<div class="empty">No device is linked. Give someone a code below.</div>`;
+    } else {
+      live.forEach(l => {
+        const mm = mins(l.last_seen);
+        const cls = mm == null ? 'off' : mm <= 10 ? 'on' : mm <= 30 ? 'stale' : 'off';
+        const seen = mm == null ? 'never' : mm < 1 ? 'just now'
+          : mm < 60 ? mm + ' min ago'
+          : mm < 1440 ? Math.floor(mm/60) + 'h ago' : Math.floor(mm/1440) + 'd ago';
+        html += `<div class="link">
+          <span class="pulse ${cls}"></span>
+          <span class="linkua">${esc(prettyAgent(l.user_agent))}</span>
+          <span class="rm">paired ${dayTime(l.paired_at)}</span>
+          <span class="rm" style="min-width:90px">seen ${seen}</span>
+          <button class="btn-sm" data-revoke="${l.id}">Unlink</button>
+        </div>`;
+      });
+    }
+
+    html += `<div class="codes">${
+      spare.length ? spare.map(c => `<span class="code">${esc(c.code)}</span>`).join('')
+                   : '<span class="rm">No codes left</span>'}
+      ${used.map(c => `<span class="code used">${esc(c.code)}</span>`).join('')}</div>
+      <div class="devbar">
+        <span class="rm">${spare.length} unused code${spare.length===1?'':'s'}${
+          spare.length && spare.length <= 2 ? ' — running low' : ''}</span>
+        <span style="flex:1"></span>
+        <button class="btn" data-print="${d.id}">Print card</button>
+        <button class="btn cta" data-issue="${d.id}">Issue 5 new codes</button>
+      </div>
+      <p class="sub" style="margin:10px 0 0;font-size:12px">
+        Issuing new codes cancels any unused ones, so a lost card stops working.</p>
+    </div>`;
+  });
+
+  m.innerHTML = html;
+  m.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
+    if (!confirm('Unlink this device? It drops back to the setup screen and will need a code.')) return;
+    const { error } = await db.rpc('revoke_device_link', { p_link: b.dataset.revoke });
+    if (error) return alert(error.message);
+    viewDevices();
+  });
+  m.querySelectorAll('[data-issue]').forEach(b => b.onclick = async () => {
+    if (!confirm('Issue 5 new codes? Any unused codes on the old card stop working.')) return;
+    const { error } = await db.rpc('issue_device_codes', { p_device: b.dataset.issue, p_count: 5 });
+    if (error) return alert(error.message);
+    viewDevices();
+  });
+  m.querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
+    const d = devs.find(x => x.id === b.dataset.print);
+    printCard(d, (d.device_codes||[]).filter(c => !c.used_at && !c.voided_at));
+  });
+}
+
+// "Mozilla/5.0 (iPad; CPU OS 17_4…" means nothing to a manager
+function prettyAgent(ua) {
+  if (!ua) return 'Unknown device';
+  if (/iPad/i.test(ua)) return 'iPad';
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/Android/i.test(ua)) return 'Android device';
+  if (/Macintosh/i.test(ua)) return 'Mac';
+  if (/Windows/i.test(ua)) return 'Windows PC';
+  return 'Unknown device';
+}
+
+function printCard(d, codes) {
+  const w = window.open('', '_blank', 'width=460,height=620');
+  w.document.write(`<title>${esc(d.name)} — setup codes</title>
+   <style>body{font-family:Helvetica,Arial,sans-serif;padding:34px;color:#222}
+   h1{font-size:19px;margin:0 0 3px}.a{font-size:12px;color:#777;margin:0 0 20px;
+   letter-spacing:.1em;text-transform:uppercase}
+   ol{padding-left:0;list-style:none;margin:0 0 22px}
+   li{font-size:23px;font-weight:700;letter-spacing:.2em;padding:11px 0;
+   border-bottom:1px dashed #ccc;display:flex;align-items:center}
+   li span{width:26px;height:26px;border:1px solid #999;margin-left:auto;display:block}
+   p{font-size:12px;color:#555;line-height:1.65;margin:0 0 8px}
+   b{color:#222}</style>
+   <h1>${esc(d.name)} — setup codes</h1>
+   <p class="a">${esc(d.areas?.name||'')} · printed ${new Date().toLocaleDateString('en-GB')}</p>
+   <ol>${codes.map(c => `<li>${esc(c.code)}<span></span></li>`).join('')}</ol>
+   <p><b>Each code works once.</b> Use the top one that has not been crossed off,
+      then tick its box.</p>
+   <p>Keep this card with the iPad. If you run out, a manager can issue more from
+      the back office from anywhere.</p>
+   <p>If the screen still will not start, <b>use the paper log</b> and tell a manager.</p>`);
   w.document.close(); w.print();
 }

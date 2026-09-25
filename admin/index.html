@@ -145,6 +145,20 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
 .imgrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .imgrow.standalone{margin:-2px 0 8px;padding:0 12px 10px}
 .imgrow img{max-height:86px;border:1px solid var(--mist);display:block}
+.dev{background:#fff;border:1px solid var(--mist);padding:18px 20px;margin-bottom:12px}
+.dev.warn{border-color:var(--warn);border-left:4px solid var(--warn)}
+.devhead{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+.devname{font-size:19px;font-weight:600}
+.devarea{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8a8681}
+.link{display:flex;align-items:center;gap:12px;background:var(--sand);padding:10px 13px;margin-bottom:6px;font-size:13px}
+.pulse{width:9px;height:9px;border-radius:50%;flex:none}
+.pulse.on{background:var(--pass)} .pulse.stale{background:var(--warn)} .pulse.off{background:var(--stone)}
+.linkua{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5c5955}
+.codes{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.code{font-size:15px;font-weight:600;letter-spacing:.14em;background:var(--warmstone);
+  padding:9px 13px;font-variant-numeric:tabular-nums}
+.code.used{background:var(--mist);color:#b5b1ab;text-decoration:line-through;font-weight:300}
+.devbar{display:flex;gap:9px;margin-top:14px;flex-wrap:wrap;align-items:center}
 .hide{display:none !important}
 </style>
 </head>
@@ -173,6 +187,7 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
     <button class="nav" data-view="records">Records</button>
     <button class="nav" data-view="checks">Checks</button>
     <button class="nav" data-view="people">People</button>
+    <button class="nav" data-view="devices">Devices</button>
     <div class="who">Signed in as <b id="me">—</b><br><button id="out">Sign out</button></div>
   </div>
   <div class="main" id="main"></div>
