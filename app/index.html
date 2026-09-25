@@ -21,7 +21,7 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .screen{position:fixed;inset:0;display:flex;flex-direction:column}
 
 /* top bar */
-.bar{height:72px;flex:none;background:#fff;border-bottom:1px solid var(--mist);
+.bar{height:78px;flex:none;background:#fff;border-bottom:1px solid var(--mist);
   display:flex;align-items:center;gap:16px;padding:0 20px;padding-top:env(safe-area-inset-top)}
 .bar{gap:14px}
 .bar svg{width:68px;height:auto;fill:var(--charcoal);display:block;overflow:visible}
@@ -224,6 +224,12 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .shotrow{background:#E8F0EB;color:var(--pass);padding:12px 15px;font-size:14px;font-weight:500}
 .remtext b{font-weight:500}
 .areaname{font-size:27px;font-weight:700;letter-spacing:-.02em;line-height:1.05}
+/* The time is the thing the whole board is measured against — "is 12:00
+   soon?" is unanswerable without it. Big enough to read from the pass. */
+.nowbox{flex:none;text-align:right;line-height:1.02;margin-right:4px}
+.bigclock{font-size:38px;font-weight:700;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;color:var(--charcoal)}
+.nowbox .sub{margin-top:2px}
 .areaname.away{color:var(--clay)}
 .switchbtn{background:none;border:1px solid var(--stone);color:#6d6a65;font-size:13px;
   padding:10px 14px;cursor:pointer;font-family:inherit;flex:none;min-height:44px}
@@ -274,7 +280,7 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .row2.now{border:2px solid var(--clay);padding:0 13px}
 .row2.dim{opacity:.62}
 .row2.done{background:#F5F4F1;border-color:#E5E2DC;cursor:default}
-.row2 .t2{width:48px;flex:none;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.row2 .t2{width:56px;flex:none;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
 .row2.dim .t2,.row2.done .t2{font-weight:400;color:#8a8681}
 .row2 .n2{flex:1;min-width:0;font-size:16px;font-weight:500;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
@@ -330,10 +336,13 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
     <div class="sep"></div>
     <div>
       <div class="areaname" id="areaname">—</div>
-      <div class="sub" id="clock">—</div>
+      <div class="sub" id="datesub">—</div>
     </div>
     <div class="spacer"></div>
-    <div class="sub" id="shiftname">—</div>
+    <div class="nowbox">
+      <div class="bigclock" id="bigclock">--:--</div>
+      <div class="sub" id="shiftname">—</div>
+    </div>
     <button class="probbtn" id="probbtn" hidden>Report a problem</button>
     <button class="switchbtn" id="switchbtn">Other floor</button>
   </div>
@@ -357,6 +366,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

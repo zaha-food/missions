@@ -236,10 +236,13 @@ function urgency(o, now) {
 }
 
 function render() {
-  const now = new Date();
-  $('clock').textContent =
+  // the anchored clock, not the iPad's own — a screen twenty minutes out
+  // would otherwise colour the board wrong as well as file wrong times
+  const now = serverNow();
+  drawClock();
+  $('datesub').textContent =
     now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: TZ })
-    + ' · ' + hhmm(now.toISOString()) + ' · nobody signed in';
+    + ' · nobody signed in';
   const sh = currentShift();
   $('shiftname').textContent = sh
     ? `${sh.name} shift · ${sh.starts.slice(0, 5)}–${sh.ends.slice(0, 5)}`
@@ -928,6 +931,14 @@ sheet().onclick = e => { if (e.target.id === 'sheet') closeSheet(); };
      - the clock reruns every 30s
      - the data reloads every 2 min, and immediately if the date changed
      - a live subscription reacts to anything signed off elsewhere     */
+/* The clock ticks on its own. render() is skipped while a check is open,
+   and a frozen clock on a wall screen is worse than none. */
+function drawClock() {
+  const c = $('bigclock');
+  if (c) c.textContent = hhmm(serverNow().toISOString());
+}
+setInterval(drawClock, 5000);
+
 let SEEN_DAY = todayLondon();
 
 setInterval(() => {
