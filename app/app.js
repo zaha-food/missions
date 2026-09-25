@@ -35,7 +35,8 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 let STATE = { stations: [], occ: [], shifts: [] };
-let JOB = null;   // the check currently open
+let JOB = null;       // the check currently open
+let LAST_JOB = null;  // kept so the finish screen knows what was just done
 
 const $ = id => document.getElementById(id);
 const sheet = () => $('sheet');
@@ -230,7 +231,7 @@ function urgency(o, now) {
   const mins = (new Date(o.due_at) - now) / 60000;
   if (mins <= -15) return 'late';
   if (mins <= 0)   return 'due';
-  if (mins <= 30)  return 'soon';
+  if (mins <= 120) return 'next';   // the next couple of hours
   return 'later';
 }
 
@@ -273,63 +274,65 @@ function render() {
   cols.innerHTML = '';
 
   STATE.stations.forEach(st => {
-    const mine = STATE.occ.filter(o => o.station_id === st.id);
-    const done = mine.filter(o => o.status !== 'pending');   // done, missed or expired
-    const open = mine.filter(o => o.status === 'pending');   // missed/expired are closed
-    const late = o => ['due', 'late'].includes(urgency(o, now));
-    open.sort((a, b) => (late(b) - late(a)) || ((a.due_at || '') < (b.due_at || '') ? -1 : 1));
-    const next = open[0];
-    const pct = mine.length ? Math.round(done.length / mine.length * 100) : 0;
+    const mine  = STATE.occ.filter(o => o.station_id === st.id);
+    const open  = mine.filter(o => o.status === 'pending');
+    const shut  = mine.filter(o => o.status !== 'pending');
+    const u     = o => urgency(o, now);
+    const byTime = (a, b) => ((a.due_at || '9') < (b.due_at || '9') ? -1 : 1);
+
+    const nowG   = open.filter(o => ['due','late'].includes(u(o)) || !o.due_at).sort(byTime);
+    const nextG  = open.filter(o => u(o) === 'next').sort(byTime);
+    const laterG = open.filter(o => u(o) === 'later').sort(byTime);
+    const pct = mine.length ? Math.round(shut.filter(o=>o.status==='done').length / mine.length * 100) : 0;
 
     const col = document.createElement('div');
     col.className = 'col';
-    col.innerHTML = `<div class="chead">
-        <span class="cname">${esc(st.name)}</span>
-        <span class="cprog">${done.length} of ${mine.length}</span>
-        <span class="cbar"><i style="width:${pct}%"></i></span>
+    col.innerHTML = `<div class="chead2">
+        <div class="ctop"><span class="cname2">${esc(st.name)}</span>
+          <span class="ccount">${shut.filter(o=>o.status==='done').length} / ${mine.length}</span></div>
+        <div class="ctrack"><i style="width:${pct}%"></i></div>
       </div>`;
-
-    if (next) {
-      const u = urgency(next, now);
-      const isLate = u === 'due' || u === 'late';
-      const mins = next.checks.est_minutes;
-      const b = document.createElement('button');
-      b.className = 'hero' + (isLate ? ' late' : (u === 'soon' ? ' soon' : ''));
-      b.innerHTML = `<span class="htag">${
-        u === 'late' ? 'Overdue — do this now'
-        : u === 'due' ? 'Due now'
-        : u === 'soon' ? 'Due shortly'
-        : 'Do this next'}</span>
-        <span class="htitle">${esc(next.checks.name)}</span>
-        <span class="hmeta">${next.due_at ? 'Due ' + hhmm(next.due_at) : 'Any time'}${mins ? ' · about ' + mins + ' min' : ''}</span>
-        <span class="hgo">Start</span>`;
-      b.onclick = () => openCheck(next);
-      col.appendChild(b);
-    } else {
-      col.insertAdjacentHTML('beforeend', `<div class="hero none">
-        <span class="htag">All done</span>
-        <span class="htitle">Nothing outstanding</span>
-        <span class="hmeta">Every mission on this side is signed off.</span></div>`);
-    }
 
     const sc = document.createElement('div');
     sc.className = 'scroll';
-    open.slice(1).forEach(o => {
-      const ru = urgency(o, now);
-      const r = document.createElement('button');
-      r.className = 'row' + (ru === 'late' || ru === 'due' ? ' late' : (ru === 'soon' ? ' soon' : ''));
-      r.innerHTML = `<span class="rt">${o.due_at ? hhmm(o.due_at) : '—'}</span>
-        <span class="dot ${ru === 'late' || ru === 'due' ? 'fail' : (ru === 'soon' ? 'soon' : '')}"></span>
-        <span class="rn">${esc(o.checks.name)}</span>`;
-      r.onclick = () => openCheck(o);
-      sc.appendChild(r);
-    });
-    if (done.length) {
-      sc.insertAdjacentHTML('beforeend', `<div class="glab">Done <span class="ln"></span></div>`);
-      done.forEach(o => sc.insertAdjacentHTML('beforeend',
-        `<div class="row done"><span class="rt">${o.due_at ? hhmm(o.due_at) : '—'}</span>
-         <span class="dot pass"></span><span class="rn">${esc(o.checks.name)}</span>
-         <span class="rm">signed</span></div>`));
+
+    const rowFor = (o, cls) => {
+      const uu = u(o);
+      const b = document.createElement('button');
+      b.className = 'row2 ' + (cls || '');
+      b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
+        <span class="n2">${esc(o.checks.name)}</span>
+        ${['due','late'].includes(uu) || !o.due_at
+          ? `<span class="go2">${uu === 'late' ? 'Overdue' : 'Start'}</span>` : ''}`;
+      b.onclick = () => openCheck(o);
+      return b;
+    };
+    const group = (label, cls, items, rowCls) => {
+      if (!items.length) return;
+      sc.insertAdjacentHTML('beforeend',
+        `<div class="glab2 ${cls}">${label}<span class="ln"></span></div>`);
+      items.forEach(o => sc.appendChild(rowFor(o, rowCls ||
+        (urgency(o, now) === 'late' ? 'late' : 'now'))));
+    };
+
+    group('Now', 'gnow', nowG);
+    group('Next up', 'gnext', nextG, '');
+    group('Later today', 'glater', laterG, 'dim');
+
+    if (shut.length) {
+      sc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done<span class="ln"></span></div>`);
+      shut.sort(byTime).forEach(o => sc.insertAdjacentHTML('beforeend',
+        `<div class="row2 done"><span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
+         ${o.status === 'done'
+           ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>'
+           : '<span class="dot fail"></span>'}
+         <span class="n2">${esc(o.checks.name)}</span>
+         <span class="rm">${o.status === 'missed' ? 'missed' : o.status === 'expired' ? '' : 'signed'}</span></div>`));
+    }
+    if (!open.length) {
+      sc.insertAdjacentHTML('afterbegin',
+        `<div class="glab2 gnext">All done<span class="ln"></span></div>
+         <div class="row2 done"><span class="n2">Nothing outstanding on this side.</span></div>`);
     }
     col.appendChild(sc);
     cols.appendChild(col);
@@ -415,7 +418,7 @@ function drawJob() {
   if (k === 'incident') return drawIncident();
   const body = k === 'temperature' ? JOB.items.map(drawUnit).join('')
              : k === 'count'       ? JOB.items.map(drawCount).join('')
-             :                       JOB.items.map(drawStep).join('');
+             :                       JOB.items.map((x,i) => drawStep(x,i)).join('');
   const total = JOB.items.length;
   const doneN = k === 'temperature'
     ? Object.keys(JOB.values).length + Object.keys(JOB.skips).length
@@ -424,18 +427,27 @@ function drawJob() {
   const ready = doneN === total;
   const isTemp = k === 'temperature';
 
+  // A checklist can ALWAYS be signed off. Refusing until every box is
+  // ticked does not produce complete checks — it produces ticked boxes
+  // for jobs nobody did. Anything missed has to carry a reason instead.
+  const isList = k === 'checklist';
+  const canSign = isList ? doneN > 0 || total === 0 : ready;
+  const missing = total - doneN;
+
   panel().innerHTML = `
-    <div class="phead">
+    <div class="jprog">
       <button class="pback">← Back</button>
-      <div class="ptitle">${esc(o.checks.name)}</div>
-      <p class="pmeta">${o.due_at ? 'Due ' + hhmm(o.due_at) : 'Any time'} ·
-        ${doneN} of ${total} ${isTemp ? 'read' : k === 'count' ? 'counted' : 'done'}</p>
+      <div class="jtop"><b>${esc(o.checks.name)}</b>
+        <span>${doneN} / ${total}</span></div>
+      <div class="ctrack"><i style="width:${total ? Math.round(doneN/total*100) : 0}%"></i></div>
     </div>
     ${o.checks.intro ? `<div class="pintro">${esc(o.checks.intro)}</div>` : ''}
     <div class="pbody">${body}</div>
     <div class="pfoot">
-      <button class="signbtn ${ready ? '' : 'off'}" ${ready ? '' : 'disabled'}>
-        ${ready ? 'Sign off with your PIN' : `${total - doneN} still to ${isTemp ? 'read' : k === 'count' ? 'count' : 'do'}`}
+      <button class="signbtn ${canSign ? '' : 'off'}" ${canSign ? '' : 'disabled'}>
+        ${!canSign ? `${missing} still to ${isTemp ? 'read' : k === 'count' ? 'count' : 'do'}`
+          : missing > 0 ? `Sign off — ${missing} not done`
+          : 'Sign off with your PIN'}
       </button>
     </div>`;
 
@@ -450,21 +462,23 @@ function drawJob() {
   if (s) s.onclick = () => askPin();
 }
 
-function drawStep(x) {
+function drawStep(x, i) {
   const on = JOB.ticked.has(x.id);
   const shot = JOB.photos[x.id];
   const needs = x.photo_required && !shot;
-  return `<div class="step ${on ? 'on' : ''}">
-      <button class="box ${on ? 'on' : ''} ${needs ? 'photo' : ''}" ${needs ? 'disabled' : `data-tick="${x.id}"`}>
+  const has = x.guidance || x.guidance_image;
+  return `<div class="step2 ${on ? 'on' : ''}">
+      <span class="snum">${i + 1}</span>
+      <button class="sbox ${on ? 'on' : ''} ${needs ? 'cam' : ''}" ${needs ? 'disabled' : `data-tick="${x.id}"`}>
         ${on ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
       </button>
-      <span class="stext">${esc(x.text)}</span>
+      <span class="stx2">${esc(x.text)}</span>
       ${x.photo_required ? (shot
         ? `<span class="shot">Photo ✓</span>`
-        : `<button class="needphoto" data-photo="${x.id}">Take photo</button>`) : ''}
-      ${(x.guidance || x.guidance_image) ? `<button class="pq" data-guide="${x.id}">?</button>` : ''}
+        : `<button class="scam" data-photo="${x.id}">Photo</button>`) : ''}
+      ${has ? `<button class="pqs" data-guide="${x.id}">?</button>` : ''}
     </div>
-    ${(x.guidance || x.guidance_image) ? `<div class="guide" id="g${x.id}">
+    ${has ? `<div class="guide" id="g${x.id}">
         ${x.guidance ? `<p>${esc(x.guidance)}</p>` : ''}
         ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
       </div>` : ''}`;
@@ -658,7 +672,9 @@ async function submit(pin) {
       ...Object.entries(JOB.skips).map(([unit_id, reason]) => ({ unit_id, skipped: true, reason }))
     ];
   } else {
-    args.p_steps = [...JOB.ticked].map(id => ({ step_id: id, photo: JOB.photos[id] || null }));
+    args.p_steps = JOB.items.map(x => JOB.ticked.has(x.id)
+      ? { step_id: x.id, done: true, photo: JOB.photos[x.id] || null }
+      : { step_id: x.id, done: false });
   }
   // when it ACTUALLY happened. Survives a late sync — the server keeps
   // both this and its own arrival time.
@@ -780,20 +796,46 @@ function corrective(fails, i, sub) {
 /* ------------------------------------------------------------ finishing */
 
 function celebrate(sub, hadFailure, offline) {
+  const J = JOB || LAST_JOB;
+  const st = STATE.stations.find(x => x.id === (J ? J.occ.station_id : null))
+          || STATE.stations[0];
+  const name = J ? J.occ.checks.name : '';
+  const now = serverNow();
+  const mine = STATE.occ.filter(o => st && o.station_id === st.id);
+  const doneN = mine.filter(o => o.status === 'done').length;
+  const next = mine.filter(o => o.status === 'pending')
+    .sort((a, b) => ((a.due_at || '9') < (b.due_at || '9') ? -1 : 1))[0];
+
   const ov = document.createElement('div');
   ov.className = 'ov';
-  ov.innerHTML = `<div class="donebox">
+  ov.innerHTML = `<div class="donebox doneb">
     <div class="tickc ${offline ? 'offl' : hadFailure ? 'warn' : ''}">
       <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
-    <h2>${offline ? 'Saved on this iPad' : hadFailure ? 'Recorded' : 'Signed off'}</h2>
-    <p>${offline ? 'No connection right now. It will send itself when the wifi is back, '
-       + 'and the record will show ' + hhmm(new Date().toISOString()) + ' — the time you did it.'
-       : esc(sub.signed_by) + ' · ' + hhmm(new Date().toISOString())
-         + (sub.was_late ? ` · logged ${sub.minutes_late} min late` : '')}</p>
-    ${hadFailure ? '<p class="warnline">Recorded as a failure. Tell a manager — alerts are not switched on yet.</p>' : ''}
+    <h2 style="font-size:23px">${offline ? 'Saved on this iPad' : esc(name)}</h2>
+    <p>${offline
+        ? 'No connection. It will send itself when the wifi is back, and the record will show '
+          + hhmm(now.toISOString()) + ' — the time you did it.'
+        : 'Signed by ' + esc(sub.signed_by) + ' at ' + hhmm(now.toISOString())
+          + (sub.was_late ? ' · ' + sub.minutes_late + ' min late' : '')}</p>
+    ${sub.steps_missed ? `<p class="warnline">${sub.steps_done} of ${sub.steps_total} done —
+        the rest recorded as not done. A manager has been told.</p>` : ''}
+    ${hadFailure ? '<p class="warnline">Recorded as a failure. A manager has been alerted.</p>' : ''}
+    ${st ? `<p style="font-size:13px;font-weight:500;color:var(--pass);margin-top:6px">
+        ${doneN} of ${mine.length} done on ${esc(st.name)}</p>` : ''}
+    ${next ? `<div class="donen">
+        <div class="donelab">Due next</div>
+        <button class="row2 now" id="gonext" style="margin:0">
+          <span class="t2">${next.due_at ? hhmm(next.due_at) : '—'}</span>
+          <span class="n2">${esc(next.checks.name)}</span>
+          <span class="go2">Start</span></button>
+        <div class="doneor">or go back to the board</div>
+      </div>` : `<div class="donen"><div class="donelab">Nothing left on this side</div></div>`}
   </div>`;
   document.body.appendChild(ov);
-  setTimeout(() => ov.remove(), 2600);
+  const go = ov.querySelector('#gonext');
+  if (go) go.onclick = () => { ov.remove(); openCheck(next); };
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  setTimeout(() => { if (document.body.contains(ov)) ov.remove(); }, 9000);
 }
 
 function markDoneLocally() {
@@ -802,7 +844,7 @@ function markDoneLocally() {
   render();
 }
 
-function closeSheet() { sheet().classList.remove('open'); JOB = null; }
+function closeSheet() { LAST_JOB = JOB; sheet().classList.remove('open'); JOB = null; }
 function toast(t) {
   let el = $('toast');
   if (!t) { el && el.remove(); return; }

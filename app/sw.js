@@ -3,11 +3,11 @@
    Caches the shell so the app always starts; data is handled by the
    queue in app.js, not here. */
 
-const CACHE = 'missions-v5';
+const CACHE = 'missions-v6';
 const SHELL = [
   './',
   './index.html',
-  './app.js?v=5',
+  './app.js?v=6',
   '../config.js',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
 ];

@@ -81,10 +81,10 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .rem .d{margin-left:auto;font-weight:300;color:#8a8681;font-size:12px}
 
 /* detail sheet */
-.sheet{position:fixed;inset:0;background:rgba(34,34,34,.45);display:none;z-index:20;
-  align-items:stretch;justify-content:flex-end}
+.sheet{position:fixed;inset:0;background:var(--sand);display:none;z-index:20;
+  align-items:stretch}
 .sheet.open{display:flex}
-.panel{background:var(--sand);width:min(560px,100%);display:flex;flex-direction:column}
+.panel{background:var(--sand);width:100%;display:flex;flex-direction:column}
 .phead{background:#fff;border-bottom:1px solid var(--mist);padding:18px 22px;flex:none}
 .pback{background:none;border:1px solid var(--stone);padding:8px 13px;font-size:13px;color:#5c5955;cursor:pointer;margin-bottom:12px}
 .ptitle{font-size:24px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
@@ -269,6 +269,62 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .netstate.off{background:var(--charcoal);color:#fff}
 .netstate.sync{background:#F7EFDD;color:var(--warn)}
 .tickc.offl{background:var(--charcoal)}
+
+/* ---- UX pass: time-based groups, targets a wet hand can hit ---- */
+.gnow{color:var(--clay)} .gnext{color:var(--charcoal)} .glater{color:#9a9691}
+.glab2{display:flex;align-items:center;gap:9px;font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;font-weight:700;margin:15px 0 7px}
+.glab2 .ln{flex:1;height:2px;background:currentColor;opacity:.25}
+.row2{background:#fff;border:1px solid var(--mist);display:flex;align-items:center;gap:13px;
+  padding:0 14px;height:62px;margin-bottom:7px;width:100%;text-align:left;cursor:pointer}
+.row2.now{border:2px solid var(--clay);padding:0 13px}
+.row2.late{border:2px solid var(--fail);padding:0 13px}
+.row2.dim{opacity:.62}
+.row2.done{background:#F5F4F1;border-color:#E5E2DC;cursor:default}
+.row2 .t2{width:48px;flex:none;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.row2.dim .t2,.row2.done .t2{font-weight:400;color:#8a8681}
+.row2 .n2{flex:1;min-width:0;font-size:16px;font-weight:500;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.row2.done .n2{font-weight:300;color:#8a8681}
+.row2 .go2{background:var(--clay);color:#fff;font-size:13px;font-weight:600;padding:10px 15px;flex:none}
+.row2.late .go2{background:var(--fail)}
+.tick2{width:26px;height:26px;border-radius:50%;background:var(--pass);color:#fff;flex:none;
+  display:flex;align-items:center;justify-content:center}
+.tick2 svg{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:3}
+.ctrack{height:10px;background:var(--mist);position:relative;overflow:hidden;margin-top:7px}
+.ctrack i{position:absolute;inset:0 auto 0 0;background:var(--pass);display:block}
+.chead2{margin-bottom:13px;flex:none}
+.ctop{display:flex;align-items:baseline;gap:10px}
+.cname2{font-size:17px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;flex:1}
+.ccount{font-size:15px;font-weight:600;color:#5c5955;font-variant-numeric:tabular-nums}
+
+/* steps a wet hand can hit */
+.step2{background:#fff;border:1px solid var(--mist);display:flex;align-items:center;gap:15px;
+  padding:0 16px;min-height:78px;margin-bottom:8px;width:100%;text-align:left;cursor:pointer}
+.step2.on{background:#F3F7F4;border-color:#CFE0D5}
+.snum{font-size:13px;font-weight:700;color:#b5b1ab;width:18px;flex:none}
+.sbox{width:42px;height:42px;border:2.5px solid var(--stone);flex:none;display:flex;
+  align-items:center;justify-content:center;background:#fff}
+.sbox.on{background:var(--pass);border-color:var(--pass)}
+.sbox.on svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:3}
+.sbox.cam{border-color:var(--clay);border-style:dashed;background:#FBEEEB}
+.stx2{flex:1;font-size:17px;font-weight:400;line-height:1.35}
+.scam{background:var(--clay);color:#fff;border:none;font-family:inherit;font-size:13px;
+  font-weight:600;padding:14px 16px;flex:none;cursor:pointer;min-height:48px}
+.pqs{width:44px;height:44px;flex:none;border:1px solid var(--stone);background:none;
+  border-radius:50%;font-size:16px;color:#6d6a65;cursor:pointer}
+.jprog{background:#fff;border-bottom:1px solid var(--mist);padding:14px 20px;flex:none}
+.jtop{display:flex;align-items:baseline;gap:12px;margin-bottom:8px}
+.jtop b{font-size:21px;font-weight:700;flex:1;letter-spacing:-.01em}
+.jtop span{font-size:15px;font-weight:600;color:#5c5955;font-variant-numeric:tabular-nums}
+
+/* finishing on what is next */
+.doneb{background:var(--sand);padding:34px 28px 24px;text-align:center;width:min(460px,100%)}
+.donen{border-top:1px solid var(--mist);margin-top:22px;padding-top:20px}
+.donelab{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:#8a8681;margin-bottom:9px}
+.doneor{font-size:13px;font-weight:300;color:#8a8681;margin-top:13px}
+
+/* missed steps */
 .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:var(--charcoal);
   color:#fff;padding:12px 20px;font-size:14px;z-index:50}
 @media (orientation:portrait){ .cols{flex-direction:column;overflow-y:auto} }
@@ -309,6 +365,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
