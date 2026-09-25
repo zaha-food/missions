@@ -200,29 +200,23 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .donebox h2{font-size:26px;font-weight:700;margin:0 0 6px}
 .donebox p{font-size:14px;font-weight:300;color:#5c5955;margin:0}
 .warnline{margin-top:10px !important;color:var(--warn) !important}
-.alertbar{flex:none;display:flex;align-items:center;gap:11px;padding:9px 20px;
-  background:#F6E5E3;border-bottom:2px solid var(--fail);animation:pulse 1.7s ease-in-out infinite}
-@keyframes pulse{0%,100%{background:#F6E5E3}50%{background:#EFC9C4}}
-.alertbar b{font-size:15px;font-weight:600;color:var(--fail)}
-.alertbar span{font-size:13px;font-weight:300;color:#6d6a65}
-.alertbar .atop{margin-left:auto;font-size:12px;font-weight:500;color:var(--fail);
-  letter-spacing:.04em}
-@media (prefers-reduced-motion:reduce){ .alertbar{animation:none} }
+/* Overdue lives on the row itself now, not in a banner above the board.
+   ONE row pulses — the oldest. If six pulse, none of them reads as urgent,
+   which is exactly the habit this system exists to break. */
+.row2.late{border:2px solid var(--fail);border-left:6px solid var(--fail);padding:0 13px 0 10px}
+.row2.late .t2{color:var(--fail)}
+.lateage{flex:none;font-size:13px;font-weight:600;color:var(--fail);letter-spacing:.01em}
+.row2.late.worst{background:#FBF1EF;animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{background:#FBF1EF}50%{background:#F2D6D1}}
+@media (prefers-reduced-motion:reduce){ .row2.late.worst{animation:none;background:#F2D6D1} }
 
-/* due soon — amber, quiet, no drama */
-.hero.soon{border-color:var(--warn)}
-.hero.soon .htag{background:var(--warn)}
-.hero.soon .hgo{background:var(--warn)}
-.hero.soon .heroicon{background:#F7EFDD}
-.row.soon{border-color:var(--warn);border-left:3px solid var(--warn)}
-.dot.soon{background:var(--warn)}
-/* Overdue: step back only what is NOT urgent. Never dim something that
-   is itself late — that would hide the very things being shouted about. */
-.cols.hasLate .row:not(.late):not(.soon){opacity:.5}
-.cols.hasLate .hero:not(.late):not(.soon){opacity:.55}
-.cols.hasLate .glab{opacity:.5}
-/* if everything is late, dimming says nothing — so it is switched off */
-.cols.allLate .row, .cols.allLate .hero, .cols.allLate .glab{opacity:1}
+/* Step back only what is NOT urgent. Never dim something that is itself
+   late — that would hide the very things being shouted about. */
+.cols.hasLate .row2:not(.late){opacity:.45}
+.cols.hasLate .glab2{opacity:.45}
+.cols.hasLate .glab2.gnow{opacity:1}
+/* if everything outstanding is late, dimming says nothing — switch it off */
+.cols.allLate .row2, .cols.allLate .glab2{opacity:1}
 .resetbtn{margin-left:14px;background:none;border:1px dashed var(--stone);color:#8a8681;
   font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:7px 11px;cursor:pointer;
   font-family:inherit;flex:none}
@@ -246,6 +240,7 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .pickw p{font-size:14px;font-weight:300;color:#5c5955;margin:0 0 16px}
 /* free text behind an "Other" option */
 .otherin{margin-top:9px}
+[hidden]{display:none !important}
 .viewbar{flex:none;display:flex;align-items:center;gap:12px;padding:10px 20px;
   background:var(--clay);color:#fff}
 .viewbar b{font-size:15px;font-weight:600}
@@ -277,7 +272,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .row2{background:#fff;border:1px solid var(--mist);display:flex;align-items:center;gap:13px;
   padding:0 14px;height:62px;margin-bottom:7px;width:100%;text-align:left;cursor:pointer}
 .row2.now{border:2px solid var(--clay);padding:0 13px}
-.row2.late{border:2px solid var(--fail);padding:0 13px}
 .row2.dim{opacity:.62}
 .row2.done{background:#F5F4F1;border-color:#E5E2DC;cursor:default}
 .row2 .t2{width:48px;flex:none;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -347,7 +341,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
   <div class="clockwarn" id="clockwarn" hidden></div>
   <div class="viewbar" id="viewbar" hidden></div>
   <div class="netstate" id="netstate" hidden></div>
-  <div class="alertbar" id="alertbar" hidden></div>
   <div class="cols" id="cols"></div>
 
   <div class="rem" id="rembar">
@@ -364,6 +357,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

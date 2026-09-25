@@ -273,6 +273,18 @@ function render() {
   const cols = $('cols');
   cols.innerHTML = '';
 
+  // Worked out before the columns are drawn: a row has to be able to say
+  // how late it is, and only ONE row should pulse. Six pulsing rows is the
+  // same as none — the eye stops picking any of them out.
+  const lates = STATE.occ.filter(o => o.checks.kind !== 'incident'
+                                   && urgency(o, now) === 'late')
+                         .sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+  const worstId = lates.length ? lates[0].id : null;
+  const lateAgo = o => {
+    const m = Math.round((now - new Date(o.due_at)) / 60000);
+    return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm late' : m + ' min late';
+  };
+
   // Reporting a problem is not a scheduled job and never "completes", so
   // it does not belong in a column or in the day's count. It sits in the bar.
   const inc = STATE.occ.filter(o => o.checks.kind === 'incident' && o.status === 'pending');
@@ -309,10 +321,12 @@ function render() {
       const uu = u(o);
       const b = document.createElement('button');
       b.className = 'row2 ' + (cls || '');
+      if (uu === 'late' && o.id === worstId) b.className += ' worst';
       b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
         <span class="n2">${esc(o.checks.name)}</span>
+        ${uu === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : ''}
         ${['due','late'].includes(uu) || !o.due_at
-          ? `<span class="go2">${uu === 'late' ? 'Overdue' : 'Start'}</span>` : ''}`;
+          ? `<span class="go2">Start</span>` : ''}`;
       b.onclick = () => openCheck(o);
       return b;
     };
@@ -347,28 +361,13 @@ function render() {
     cols.appendChild(col);
   });
 
-  const pending = STATE.occ.filter(o => o.status === 'pending');
-  const lates = STATE.occ.filter(o => urgency(o, now) === 'late')
-                         .sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+  // The overdue banner is gone. It repeated what the board already shows —
+  // every late mission sits at the top of its own column in red — and it
+  // ate the vertical space the columns need when the day is at its fullest.
+  const pending = STATE.occ.filter(o => o.status === 'pending' && o.checks.kind !== 'incident');
   cols.classList.toggle('hasLate', lates.length > 0);
   // when everything outstanding is late, dimming communicates nothing
   cols.classList.toggle('allLate', lates.length > 0 && lates.length === pending.length);
-
-  // Every overdue mission is already at the top of its own column, in red.
-  // A second expandable list of the same rows was duplication that ate the
-  // space the board needs — the bar is now just the glance-from-across-the-
-  // room count, and the answer to "which ones?" is the board itself.
-  const bar = $('alertbar');
-  if (lates.length) {
-    const worst = lates[0];
-    const mins = Math.round((now - new Date(worst.due_at)) / 60000);
-    const station = STATE.stations.find(s => s.id === worst.station_id);
-    bar.innerHTML = `<b>${lates.length} overdue</b>
-      <span>Oldest: ${esc(worst.checks.name)} · ${esc(station ? station.name : '')} ·
-        ${mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + ' min'} late</span>
-      <span class="atop">At the top of the list, in red</span>`;
-    bar.hidden = false;
-  } else bar.hidden = true;
 }
 
 /* more than one incident form set up — ask which side it happened on */
