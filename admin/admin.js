@@ -935,13 +935,35 @@ async function viewDevices() {
 
   m.innerHTML = html;
   m.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
-    if (!confirm('Unlink this device? It drops back to the setup screen and will need a code.')) return;
+    if (!confirm(
+`Unlink this device?
+
+• It stops working within about 3 minutes
+• Whoever is using it drops back to the setup screen mid-shift
+• They will need an unused code from the card to get going again
+
+Anything already signed off stays recorded.`)) return;
     const { error } = await db.rpc('revoke_device_link', { p_link: b.dataset.revoke });
     if (error) return alert(error.message);
     viewDevices();
   });
   m.querySelectorAll('[data-issue]').forEach(b => b.onclick = async () => {
-    if (!confirm('Issue 5 new codes? Any unused codes on the old card stop working.')) return;
+    const d = devs.find(x => x.id === b.dataset.issue);
+    const spare = (d.device_codes || []).filter(c => !c.used_at && !c.voided_at).length;
+    const live = (d.device_links || []).filter(l => l.active).length;
+    if (!confirm(
+`Issue 5 new setup codes for ${d.name}?
+
+WHAT HAPPENS
+• The ${spare} unused code${spare === 1 ? '' : 's'} on the current card stop working straight away
+• 5 new codes are created
+• You will need to print the new card and replace the old one
+
+WHAT DOES NOT HAPPEN
+• The ${live} device${live === 1 ? '' : 's'} already linked to this screen keep working
+• Nobody is signed out and no shift is interrupted
+
+To unlink a device, use Unlink next to it instead.`)) return;
     const { error } = await db.rpc('issue_device_codes', { p_device: b.dataset.issue, p_count: 5 });
     if (error) return alert(error.message);
     viewDevices();
