@@ -603,8 +603,8 @@ function keypad(unitId) {
           <div class="padlim">Why is there nothing to measure?</div>
         </div>
         <div class="reasons">
-          ${['Sold out','Not on the menu today','Not out yet','Equipment off']
-            .map(r => `<button class="opt" data-r="${esc(r)}">${esc(r)}</button>`).join('')}
+          ${['Out of stock','Not made yet']
+            .map(r => `<button class="opt big" data-r="${esc(r)}">${esc(r)}</button>`).join('')}
         </div>
         <button class="padcancel">Back</button></div>`;
       ov.querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
