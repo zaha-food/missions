@@ -533,17 +533,25 @@ function takePhoto(stepId) {
     const f = inp.files[0]; if (!f) return;
     toast('Saving photo…');
     try {
-      const blob = await shrink(f);
-      const path = `${JOB.occ.id}/${stepId}-${Date.now()}.jpg`;
+      const blob  = await shrink(f);
+      const thumb = await shrink(f, 400, 0.62);
+      const stamp = Date.now();
+      const path      = `${JOB.occ.id}/${stepId}-${stamp}.jpg`;
+      const thumbPath = `${JOB.occ.id}/${stepId}-${stamp}-t.jpg`;
       JOB.pendingPhotos = JOB.pendingPhotos || [];
 
+      // the pair travels together, so the small one can never be missing
+      // for a record that has a full photo
+      const hold = () => JOB.pendingPhotos.push({ stepId, path, blob, thumbPath, thumbBlob: thumb });
       if (navigator.onLine) {
-        const { error } = await db.storage.from('evidence').upload(path, blob,
+        const up = await db.storage.from('evidence').upload(path, blob,
           { contentType: 'image/jpeg' });
-        // offline mid-shot: keep the image and send it with the record later
-        if (error) JOB.pendingPhotos.push({ stepId, path, blob });
+        const upT = await db.storage.from('evidence').upload(thumbPath, thumb,
+          { contentType: 'image/jpeg' });
+        // offline mid-shot: keep both and send them with the record later
+        if (up.error || upT.error) hold();
       } else {
-        JOB.pendingPhotos.push({ stepId, path, blob });
+        hold();
       }
       JOB.photos[stepId] = path;
       if (stepId !== 'incident') JOB.ticked.add(stepId);
@@ -554,19 +562,26 @@ function takePhoto(stepId) {
   inp.click();
 }
 
-// keep evidence photos small — the retention sums assume ~150KB each
-function shrink(file) {
+/* Two sizes of every evidence photo.
+   The full one (1200px, ~200KB) is the real evidence and is culled at 90
+   days. The small one (400px, ~30KB) outlives it, so a photo-required
+   step never decays into a tick with nothing behind it. 400 rather than
+   the 200 originally planned: at 200 you can see THAT there is a tray,
+   not WHETHER it is clean, which is the only question worth asking. */
+function shrink(file, max = 1200, q = 0.7) {
   return new Promise((res, rej) => {
     const img = new Image();
+    const url = URL.createObjectURL(file);
     img.onload = () => {
-      const max = 1200, s = Math.min(1, max / Math.max(img.width, img.height));
+      URL.revokeObjectURL(url);
+      const s = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement('canvas');
       c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob(b => b ? res(b) : rej(new Error('could not compress')), 'image/jpeg', 0.7);
+      c.toBlob(b => b ? res(b) : rej(new Error('could not compress')), 'image/jpeg', q);
     };
-    img.onerror = () => rej(new Error('could not read the image'));
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('could not read the image')); };
+    img.src = url;
   });
 }
 
@@ -1181,6 +1196,11 @@ async function flushQueue() {
         const { error } = await db.storage.from('evidence')
           .upload(ph.path, ph.blob, { contentType: 'image/jpeg' });
         if (error && !/exists/i.test(error.message)) throw error;
+        if (ph.thumbBlob) {
+          const t = await db.storage.from('evidence')
+            .upload(ph.thumbPath, ph.thumbBlob, { contentType: 'image/jpeg' });
+          if (t.error && !/exists/i.test(t.error.message)) throw t.error;
+        }
         if (ph.stepId === 'incident') args.p_photo = ph.path;
         else if (args.p_steps) {
           const st = args.p_steps.find(s => s.step_id === ph.stepId);
