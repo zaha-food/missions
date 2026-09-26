@@ -106,10 +106,16 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .guide img{max-width:100%;display:block;border:1px solid rgba(0,0,0,.08)}
 .guideimg{max-width:100%;display:block;margin:-3px 0 7px;border:1px solid var(--mist)}
 .guide.open{display:block}
-.unit{background:#fff;border:1px solid var(--mist);display:flex;align-items:center;gap:12px;
-  padding:0 14px;height:56px;margin-bottom:7px}
-.uname{font-size:15px;font-weight:400;flex:1}
-.ulim{font-size:12px;font-weight:300;color:#6d6a65}
+/* Temperature and count rows are built exactly like checklist rows:
+   the border belongs to the ROW, and the "?" sits inside it. They also
+   open a keypad, so they are no smaller a target than a tick box. */
+.unitrow{background:#fff;border:1px solid var(--mist);display:flex;align-items:stretch;
+  min-height:70px;margin-bottom:8px}
+.unit{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:0 16px;
+  background:none;border:none;font-family:inherit;text-align:left;cursor:pointer}
+.unitrow .pqs{margin:auto 16px auto 0}
+.uname{font-size:17px;font-weight:400;flex:1;min-width:0}
+.ulim{font-size:12px;font-weight:300;color:#6d6a65;flex:none}
 .pfoot{flex:none;background:#fff;border-top:1px solid var(--mist);padding:14px 22px}
 .notyet{background:var(--warmstone);padding:12px 15px;font-size:13px;font-weight:300;line-height:1.5}
 
@@ -130,22 +136,18 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .signbtn{width:100%;background:var(--charcoal);color:#fff;border:none;cursor:pointer;
   font-size:17px;font-weight:500;height:56px}
 .signbtn.off{background:var(--mist);color:#9a9691;cursor:not-allowed}
-.unit{flex:1;min-width:0;text-align:left;cursor:pointer}
-.unitrow{display:flex;gap:8px;align-items:stretch;margin-bottom:8px}
-.unitrow .pqs{align-self:stretch;height:auto}
-.unitrow .unit{margin-bottom:0}
-.unit.pass{border-color:var(--pass);border-left:4px solid var(--pass)}
-.unit.fail{border-color:var(--fail);border-left:4px solid var(--fail);background:#FBF0EF}
-.unit.skip{border-left:4px solid var(--stone);background:#FAF9F7}
-.unit.skip .uname{color:#8a8681}
-.unit.skip .uval{color:#9a9691;font-size:14px;font-weight:400}
+.unitrow.pass{border-color:var(--pass);border-left:4px solid var(--pass)}
+.unitrow.fail{border-color:var(--fail);border-left:4px solid var(--fail);background:#FBF0EF}
+.unitrow.skip{border-left:4px solid var(--stone);background:#FAF9F7}
+.unitrow.skip .uname{color:#8a8681}
+.unitrow.skip .uval{color:#9a9691;font-size:14px;font-weight:400}
 .padna{width:100%;margin-top:9px;background:#fff;border:1px solid var(--stone);
   height:46px;font-size:15px;color:#5c5955;cursor:pointer;font-family:inherit}
 .reasons{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
 .reasons .opt.big{font-size:18px;font-weight:500;padding:22px 18px;width:100%}
 .reasons .opt{width:100%;min-height:52px;font-size:16px}
 .uval{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;flex:none;color:#9a9691}
-.unit.pass .uval{color:var(--pass)} .unit.fail .uval{color:var(--fail)}
+.unitrow.pass .uval{color:var(--pass)} .unitrow.fail .uval{color:var(--fail)}
 
 /* ---- overlays: keypad, PIN, done ---- */
 .ov{position:fixed;inset:0;background:rgba(34,34,34,.55);z-index:40;
@@ -279,6 +281,12 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .glab2{display:flex;align-items:center;gap:9px;font-size:11px;letter-spacing:.16em;
   text-transform:uppercase;font-weight:700;margin:15px 0 7px}
 .glab2 .ln{flex:1;height:2px;background:currentColor;opacity:.25}
+/* The doors opening is the one moment in the day that changes what a
+   late task costs you, so it gets a line of its own rather than a label. */
+.openline{display:flex;align-items:center;gap:10px;margin:12px 0 10px;flex:none}
+.openline::before,.openline::after{content:'';height:2px;background:var(--clay);flex:1}
+.openline span{font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+  color:#fff;background:var(--clay);padding:5px 11px;flex:none}
 .row2{background:#fff;border:1px solid var(--mist);display:flex;align-items:center;gap:13px;
   padding:0 14px;height:62px;margin-bottom:7px;width:100%;text-align:left;cursor:pointer}
 .row2.now{border:2px solid var(--clay);padding:0 13px}
@@ -370,6 +378,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

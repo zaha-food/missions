@@ -157,11 +157,12 @@ async function load() {
   STATE.area = area;
 
   // testing only: the reset button vanishes once the site has a go-live date
-  const { data: site } = await db.from('sites').select('go_live').limit(1);
+  const { data: site } = await db.from('sites').select('go_live,opens_at').limit(1);
   STATE.testing = !!site && site.length > 0 && !site[0].go_live;
 
   STATE.stations = (area.stations || []).sort((a, b) => a.sort - b.sort);
   STATE.shifts = (area.shifts || []).sort((a, b) => a.sort - b.sort);
+  STATE.opensAt = site && site[0] ? site[0].opens_at : null;
 
   if (!STATE.stations.length) {
     const home = areas.find(a => a.id === homeArea());
@@ -192,6 +193,7 @@ async function load() {
 
   STATE.occ = occ || [];
   IDB.put('board', { k: 'last', stations: STATE.stations, shifts: STATE.shifts,
+    opensAt: STATE.opensAt,
                      reminders: STATE.reminders, occ: STATE.occ,
                      date: todayLondon(), at: Date.now() }).catch(() => {});
   $('msg').classList.add('hide');
@@ -203,7 +205,7 @@ async function loadCached() {
   try {
     const c = await IDB.get('board', 'last');
     if (!c || c.date !== todayLondon()) return false;
-    STATE.stations = c.stations; STATE.shifts = c.shifts;
+    STATE.stations = c.stations; STATE.shifts = c.shifts; STATE.opensAt = c.opensAt;
     STATE.reminders = c.reminders; STATE.occ = c.occ;
     $('msg').classList.add('hide');
     render();
@@ -333,12 +335,35 @@ function render() {
       b.onclick = () => openCheck(o);
       return b;
     };
+    // 11:15 and 11:45 look identical on a screen, and one of them is
+    // "before a customer walks in". Draw the line the day actually turns on.
+    //
+    // The crossing almost always falls BETWEEN groups — prep is overdue or
+    // due now, everything after opening is next up — so this state spans
+    // the whole column, not one group. When the crossing lands on a group
+    // boundary the line goes above the heading, where it reads properly.
+    const opens = STATE.opensAt ? STATE.opensAt.slice(0, 5) : null;
+    const beforeOpen = o => !!(opens && o.due_at && hhmm(o.due_at) < opens);
+    const openLine = `<div class="openline"><span>Doors open ${opens}</span></div>`;
+    let sawBefore = false, lineDrawn = false;
+
     const group = (label, cls, items, rowCls) => {
       if (!items.length) return;
+      if (opens && sawBefore && !lineDrawn && !beforeOpen(items[0])) {
+        sc.insertAdjacentHTML('beforeend', openLine);   // above the heading
+        lineDrawn = true;
+      }
       sc.insertAdjacentHTML('beforeend',
         `<div class="glab2 ${cls}">${label}<span class="ln"></span></div>`);
-      items.forEach(o => sc.appendChild(rowFor(o, rowCls ||
-        (urgency(o, now) === 'late' ? 'late' : 'now'))));
+      items.forEach(o => {
+        if (opens && sawBefore && !lineDrawn && !beforeOpen(o)) {
+          sc.insertAdjacentHTML('beforeend', openLine);
+          lineDrawn = true;
+        }
+        if (beforeOpen(o)) sawBefore = true;
+        sc.appendChild(rowFor(o, rowCls ||
+          (urgency(o, now) === 'late' ? 'late' : 'now')));
+      });
     };
 
     group('Now', 'gnow', nowG);
@@ -488,35 +513,33 @@ function drawStep(x, i) {
       </div>` : ''}`;
 }
 
-function drawUnit(u) {
-  const v = JOB.values[u.id];
-  const sk = JOB.skips[u.id];
-  // A temperature round carries how-to just as a checklist does — where
-  // to put the probe matters more than any tick box on the other screens.
-  const has = u.guidance || u.guidance_image;
-  const guide = has ? `<div class="guide" id="gu${u.id}">
-        ${u.guidance ? `<p>${esc(u.guidance)}</p>` : ''}
-        ${u.guidance_image ? `<img src="${esc(u.guidance_image)}" alt="How to take this reading" loading="lazy">` : ''}
+/* One row builder for temperatures and counts. Same shape as a checklist
+   step: the border is on the row, the "?" lives inside it. */
+function itemRow(it, kind, state, right, sub) {
+  const has = it.guidance || it.guidance_image;
+  const guide = has ? `<div class="guide" id="gu${it.id}">
+        ${it.guidance ? `<p>${esc(it.guidance)}</p>` : ''}
+        ${it.guidance_image ? `<img src="${esc(it.guidance_image)}" alt="How this is done" loading="lazy">` : ''}
       </div>` : '';
-  const q = has ? `<button class="pqs" data-guide="u${u.id}">?</button>` : '';
-
-  if (sk) return `<div class="unitrow">
-      <button class="unit skip" data-unit="${u.id}">
-        <span class="uname">${esc(u.name)}</span>
-        <span class="ulim">${esc(sk)}</span>
-        <span class="uval">n/a</span>
-      </button>${q}
+  return `<div class="unitrow ${state}">
+      <button class="unit" data-${kind}="${it.id}">
+        <span class="uname">${esc(it.name)}</span>
+        <span class="ulim">${sub}</span>
+        <span class="uval">${right}</span>
+      </button>
+      ${has ? `<button class="pqs" data-guide="u${it.id}">?</button>` : ''}
     </div>${guide}`;
+}
 
-  const hasV = v !== undefined;
-  const pass = hasV && (u.limit_kind === 'max' ? v <= u.limit_c : v >= u.limit_c);
-  return `<div class="unitrow">
-      <button class="unit ${hasV ? (pass ? 'pass' : 'fail') : ''}" data-unit="${u.id}">
-        <span class="uname">${esc(u.name)}</span>
-        <span class="ulim">${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C</span>
-        <span class="uval">${hasV ? v + '°' : 'tap'}</span>
-      </button>${q}
-    </div>${guide}`;
+function drawUnit(u) {
+  const sk = JOB.skips[u.id];
+  if (sk) return itemRow(u, 'unit', 'skip', 'n/a', esc(sk));
+  const v = JOB.values[u.id];
+  const has = v !== undefined;
+  const pass = has && (u.limit_kind === 'max' ? v <= u.limit_c : v >= u.limit_c);
+  return itemRow(u, 'unit', has ? (pass ? 'pass' : 'fail') : '',
+    has ? v + '°' : 'tap',
+    `${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C`);
 }
 
 function tick(id) {
@@ -1008,13 +1031,11 @@ function drawCount(it) {
   const q = JOB.values[it.id];
   const has = q !== undefined;
   const low = has && it.reorder_level != null && q < it.reorder_level;
-  return `<button class="unit ${has ? (low ? 'fail' : 'pass') : ''}" data-count="${it.id}">
-      <span class="uname">${esc(it.name)}</span>
-      <span class="ulim">${it.reorder_level != null
-        ? 'order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
-        : (it.unit_label ? esc(it.unit_label) : '')}</span>
-      <span class="uval">${has ? q : 'tap'}</span>
-    </button>`;
+  return itemRow(it, 'count', has ? (low ? 'fail' : 'pass') : '',
+    has ? q : 'tap',
+    it.reorder_level != null
+      ? 'order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
+      : (it.unit_label ? esc(it.unit_label) : ''));
 }
 
 function countPad(itemId) {
