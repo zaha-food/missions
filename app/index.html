@@ -130,7 +130,10 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .signbtn{width:100%;background:var(--charcoal);color:#fff;border:none;cursor:pointer;
   font-size:17px;font-weight:500;height:56px}
 .signbtn.off{background:var(--mist);color:#9a9691;cursor:not-allowed}
-.unit{width:100%;text-align:left;cursor:pointer}
+.unit{flex:1;min-width:0;text-align:left;cursor:pointer}
+.unitrow{display:flex;gap:8px;align-items:stretch;margin-bottom:8px}
+.unitrow .pqs{align-self:stretch;height:auto}
+.unitrow .unit{margin-bottom:0}
 .unit.pass{border-color:var(--pass);border-left:4px solid var(--pass)}
 .unit.fail{border-color:var(--fail);border-left:4px solid var(--fail);background:#FBF0EF}
 .unit.skip{border-left:4px solid var(--stone);background:#FAF9F7}
@@ -367,6 +370,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

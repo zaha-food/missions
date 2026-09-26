@@ -491,19 +491,32 @@ function drawStep(x, i) {
 function drawUnit(u) {
   const v = JOB.values[u.id];
   const sk = JOB.skips[u.id];
-  if (sk) return `<button class="unit skip" data-unit="${u.id}">
-      <span class="uname">${esc(u.name)}</span>
-      <span class="ulim">${esc(sk)}</span>
-      <span class="uval">n/a</span>
-    </button>`;
-  const has = v !== undefined;
-  const pass = has && (u.limit_kind === 'max' ? v <= u.limit_c : v >= u.limit_c);
-  return `<button class="unit ${has ? (pass ? 'pass' : 'fail') : ''}" data-unit="${u.id}">
-      <span class="uname">${esc(u.name)}</span>
-      <span class="ulim">${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C</span>
-      <span class="uval">${has ? v + '°' : 'tap'}</span>
-    </button>
-    ${u.guidance_image ? `<img class="guideimg" src="${esc(u.guidance_image)}" alt="" loading="lazy">` : ''}`;
+  // A temperature round carries how-to just as a checklist does — where
+  // to put the probe matters more than any tick box on the other screens.
+  const has = u.guidance || u.guidance_image;
+  const guide = has ? `<div class="guide" id="gu${u.id}">
+        ${u.guidance ? `<p>${esc(u.guidance)}</p>` : ''}
+        ${u.guidance_image ? `<img src="${esc(u.guidance_image)}" alt="How to take this reading" loading="lazy">` : ''}
+      </div>` : '';
+  const q = has ? `<button class="pqs" data-guide="u${u.id}">?</button>` : '';
+
+  if (sk) return `<div class="unitrow">
+      <button class="unit skip" data-unit="${u.id}">
+        <span class="uname">${esc(u.name)}</span>
+        <span class="ulim">${esc(sk)}</span>
+        <span class="uval">n/a</span>
+      </button>${q}
+    </div>${guide}`;
+
+  const hasV = v !== undefined;
+  const pass = hasV && (u.limit_kind === 'max' ? v <= u.limit_c : v >= u.limit_c);
+  return `<div class="unitrow">
+      <button class="unit ${hasV ? (pass ? 'pass' : 'fail') : ''}" data-unit="${u.id}">
+        <span class="uname">${esc(u.name)}</span>
+        <span class="ulim">${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C</span>
+        <span class="uval">${hasV ? v + '°' : 'tap'}</span>
+      </button>${q}
+    </div>${guide}`;
 }
 
 function tick(id) {
