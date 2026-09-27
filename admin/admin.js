@@ -672,6 +672,9 @@ async function publish() {
     }
 
     await db.rpc('spawn_occurrences');
+    // a new version is no use if today's board is still pointing at the old
+    // one — move every unsigned mission onto it so the edit lands now
+    await db.rpc('refresh_pending_versions');
     $('drawer').classList.remove('open');
     viewChecks();
   } catch (e) {
