@@ -234,15 +234,21 @@ async function openRecord(occId) {
       : 'Not done yet.'}</div>`;
   } else {
     const [steps, reads, counts, cas] = await Promise.all([
-      db.from('record_steps').select('done,done_at,steps(text,photo_required)').eq('record_id', rec.id),
+      db.from('record_steps').select('done,done_at,reason,steps(sort,text,photo_required)').eq('record_id', rec.id),
       db.from('readings').select('value_c,passed,skipped,skip_reason,taken_at,units(name,limit_c,limit_kind)').eq('record_id', rec.id),
       db.from('counts').select('qty,below_reorder,count_items(name,reorder_level,unit_label)').eq('record_id', rec.id),
       db.from('corrective_actions').select('*,readings(value_c,units(name,limit_c))').eq('record_id', rec.id)
     ]);
 
-    (steps.data || []).forEach(s => {
-      body += `<div class="line"><span class="dot pass"></span>
-        <span>${esc(s.steps.text)}</span><span class="v">${hhmm(s.done_at)}</span></div>`;
+    // a done step shows the time it was ticked; a missed one shows why
+    (steps.data || []).sort((a, b) => a.steps.sort - b.steps.sort).forEach(s => {
+      body += s.done
+        ? `<div class="line"><span class="dot pass"></span>
+            <span>${esc(s.steps.text)}${s.reason ? ` <small style="color:#8a8681">— ${esc(s.reason)}</small>` : ''}</span>
+            <span class="v">${hhmm(s.done_at)}</span></div>`
+        : `<div class="line skip"><span class="dot fail"></span>
+            <span>${esc(s.steps.text)}</span>
+            <span class="v">not done${s.reason ? ' — ' + esc(s.reason) : ''}</span></div>`;
     });
     (reads.data || []).forEach(r => {
       if (r.skipped) {
@@ -492,7 +498,7 @@ function drawBuilder() {
 function blankItem() {
   if (B.kind === 'temperature') return { name: '', limit_kind: 'max', limit_c: 8, basis: '', guidance: '', guidance_image: null };
   if (B.kind === 'count') return { name: '', reorder_level: 1, unit_label: '', guidance: '', guidance_image: null };
-  return { text: '', photo_required: false, guidance: '', guidance_image: null };
+  return { text: '', photo_required: false, guidance: '', guidance_image: null, est_minutes: null, alt_label: '' };
 }
 
 function itemRow(it, i) {
@@ -520,6 +526,11 @@ function itemRow(it, i) {
         <button class="del" data-del="${i}">✕</button>
       </div>
       <input class="finp tiny" data-i="${i}" data-f="guidance" value="${esc(it.guidance || '')}" placeholder="How to do it — shown behind the ? (optional)">
+      <div class="inline">
+        <input class="finp sm" type="number" min="0" data-i="${i}" data-f="est_minutes" value="${esc(it.est_minutes ?? '')}" placeholder="min">
+        <span class="deg">min</span>
+        <input class="finp tiny" data-i="${i}" data-f="alt_label" value="${esc(it.alt_label || '')}" placeholder="Other answer that also completes it, e.g. No delivery today (optional)">
+      </div>
       ${imgRow(it, i)}
     </div>`;
 }
@@ -576,7 +587,9 @@ function bindItems(p) {
   p.querySelectorAll('[data-f]').forEach(el => el.oninput = el.onchange = e => {
     const i = +e.target.dataset.i, f = e.target.dataset.f;
     B.items[i][f] = f === 'limit_c' ? parseFloat(e.target.value)
-      : f === 'reorder_level' ? parseInt(e.target.value, 10) : e.target.value;
+      : f === 'reorder_level' ? parseInt(e.target.value, 10)
+      : f === 'est_minutes' ? (e.target.value === '' ? null : parseInt(e.target.value, 10))
+      : e.target.value;
   });
   p.querySelectorAll('[data-photo]').forEach(b => b.onclick = () => {
     const i = +b.dataset.photo; B.items[i].photo_required = !B.items[i].photo_required; drawBuilder();
@@ -652,7 +665,8 @@ async function publish() {
           unit_label: it.unit_label || null, guidance: it.guidance || null,
           guidance_image: it.guidance_image || null };
         return { ...base, text: it.text, photo_required: !!it.photo_required,
-          guidance: it.guidance || null, guidance_image: it.guidance_image || null };
+          guidance: it.guidance || null, guidance_image: it.guidance_image || null,
+          est_minutes: it.est_minutes ?? null, alt_label: (it.alt_label || '').trim() || null };
       });
       const { error } = await db.from(tbl).insert(rows);
       if (error) throw error;
@@ -660,8 +674,12 @@ async function publish() {
 
     if (B.kind !== 'reminder') {
       const s = B.sched;
+      // "any time between 10:00 and 11:20" — it appears when its window opens
+      const mins = t => { const [h, m] = (t || '').slice(0, 5).split(':').map(Number); return h * 60 + m; };
+      const win = ['once_daily','certain_days'].includes(s.pattern) && s.window_start && s.window_end
+        ? mins(s.window_end) - mins(s.window_start) : null;
       const sched = { check_id: checkId, pattern: s.pattern, days: s.days || [1,2,3,4,5,6,7],
-        lead_minutes: s.lead_minutes ?? 15, active: true,
+        lead_minutes: win > 0 ? win : (s.lead_minutes ?? 15), active: true,
         window_start: ['once_daily','every_n_hours','certain_days'].includes(s.pattern) ? s.window_start : null,
         window_end:   ['once_daily','every_n_hours','certain_days'].includes(s.pattern) ? s.window_end : null,
         times:        s.pattern === 'set_times' ? s.times : null,

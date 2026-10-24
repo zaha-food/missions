@@ -182,7 +182,7 @@ async function load() {
   STATE.reminders = rem || [];
 
   const { data: occ, error: e2 } = await db.from('occurrences')
-    .select('id,due_at,status,station_id,check_version_id,checks(id,name,kind,intro,est_minutes)')
+    .select('id,due_at,appears_at,status,station_id,check_version_id,checks(id,name,kind,intro,est_minutes)')
     .eq('service_date', todayLondon())
     .in('station_id', STATE.stations.map(s => s.id))
     .order('due_at');
@@ -192,6 +192,7 @@ async function load() {
   }
 
   STATE.occ = occ || [];
+  pruneDrafts();
   IDB.put('board', { k: 'last', stations: STATE.stations, shifts: STATE.shifts,
     opensAt: STATE.opensAt,
                      reminders: STATE.reminders, occ: STATE.occ,
@@ -233,6 +234,9 @@ function urgency(o, now) {
   const mins = (new Date(o.due_at) - now) / 60000;
   if (mins <= -15) return 'late';
   if (mins <= 0)   return 'due';
+  // inside its window ("any time between 10:00 and 11:20") it is a job
+  // for now, not for later — the opening must read as Start at 10:00
+  if (o.appears_at && new Date(o.appears_at) <= now) return 'due';
   if (mins <= 120) return 'next';   // the next couple of hours
   return 'later';
 }
@@ -322,15 +326,20 @@ function render() {
     const sc = document.createElement('div');
     sc.className = 'scroll';
 
+    const DR = drafts();
     const rowFor = (o, cls) => {
       const uu = u(o);
+      const dr = DR[o.id];
+      const got = dr ? Object.keys(dr.at || {}).length : 0;
       const b = document.createElement('button');
       b.className = 'row2 ' + (cls || '');
       if (uu === 'late' && o.id === worstId) b.className += ' worst';
       b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
         <span class="n2">${esc(o.checks.name)}</span>
+        ${got ? `<span class="prog2">${got} of ${dr.total}</span>` : ''}
         ${uu === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : ''}
-        ${['due','late'].includes(uu) || !o.due_at
+        ${got ? `<span class="go2">Carry on</span>`
+          : ['due','late'].includes(uu) || !o.due_at
           ? `<span class="go2">Start</span>` : ''}`;
       b.onclick = () => openCheck(o);
       return b;
@@ -417,8 +426,38 @@ function pickIncident(list) {
 
 /* ------------------------------------------------------------ open a job */
 
+/* Ticks on a checklist are kept on the iPad as they happen. One person
+   works through the opening for over an hour before signing — a reload,
+   a dropped connection or closing the sheet must not wipe that. Each
+   tick keeps its own time; the PIN only comes at the end. */
+const DRAFT_KEY = 'missions-drafts';
+function drafts() {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}'); } catch { return {}; }
+}
+function saveDraft() {
+  if (!JOB || JOB.kind !== 'checklist') return;
+  const all = drafts();
+  if (JOB.ticked.size) all[JOB.occ.id] = { at: JOB.tickAt, alts: JOB.alts, total: JOB.items.length };
+  else delete all[JOB.occ.id];
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(all)); } catch {}
+}
+function dropDraft(id) {
+  const all = drafts();
+  if (!(id in all)) return;
+  delete all[id];
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(all)); } catch {}
+}
+// anything signed, missed or gone no longer needs its ticks
+function pruneDrafts() {
+  const all = drafts(), open = new Set(STATE.occ.filter(o => o.status === 'pending').map(o => o.id));
+  let changed = false;
+  for (const id of Object.keys(all)) if (!open.has(id)) { delete all[id]; changed = true; }
+  if (changed) try { localStorage.setItem(DRAFT_KEY, JSON.stringify(all)); } catch {}
+}
+
 async function openCheck(o) {
-  JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {} };
+  JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
+          tickAt: {}, alts: {} };
   sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
@@ -432,13 +471,21 @@ async function openCheck(o) {
         .eq('check_version_id', o.check_version_id).order('sort')
     : k === 'incident'
     ? Promise.resolve({ data: [], error: null })
-    : db.from('steps').select('id,sort,text,photo_required,guidance,guidance_image')
+    : db.from('steps').select('id,sort,text,photo_required,guidance,guidance_image,est_minutes,alt_label')
         .eq('check_version_id', o.check_version_id).order('sort');
   const { data, error } = await q;
   if (error) { panel().innerHTML = `<div class="phead"><div class="ptitle">Could not load</div>
     <p class="pmeta">${esc(error.message)}</p></div>`; return; }
 
   JOB.items = data || [];
+  const d = drafts()[o.id];
+  if (d && k === 'checklist') {
+    const ids = new Set(JOB.items.map(x => x.id));
+    for (const [id, at] of Object.entries(d.at || {})) if (ids.has(id)) {
+      JOB.ticked.add(id); JOB.tickAt[id] = at;
+      if (d.alts && d.alts[id]) JOB.alts[id] = d.alts[id];
+    }
+  }
   drawJob();
 }
 
@@ -475,13 +522,15 @@ function drawJob() {
     <div class="pfoot">
       <button class="signbtn ${canSign ? '' : 'off'}" ${canSign ? '' : 'disabled'}>
         ${!canSign ? `${missing} still to ${isTemp ? 'read' : k === 'count' ? 'count' : 'do'}`
-          : missing > 0 ? `Sign off — ${missing} not done`
+          : missing > 0 ? `Complete — ${missing} not done`
+          : isList ? `Complete ${esc(o.checks.name.toLowerCase())} with your PIN`
           : 'Sign off with your PIN'}
       </button>
     </div>`;
 
   panel().querySelector('.pback').onclick = closeSheet;
   panel().querySelectorAll('[data-tick]').forEach(b => b.onclick = () => tick(b.dataset.tick));
+  panel().querySelectorAll('[data-alt]').forEach(b => b.onclick = () => tickAlt(b.dataset.alt));
   panel().querySelectorAll('[data-photo]').forEach(b => b.onclick = () => takePhoto(b.dataset.photo));
   panel().querySelectorAll('[data-guide]').forEach(b => b.onclick = () =>
     $('g' + b.dataset.guide).classList.toggle('open'));
@@ -496,12 +545,16 @@ function drawStep(x, i) {
   const shot = JOB.photos[x.id];
   const needs = x.photo_required && !shot;
   const has = x.guidance || x.guidance_image;
+  const alt = JOB.alts[x.id];
   return `<div class="step2 ${on ? 'on' : ''}">
       <span class="snum">${i + 1}</span>
       <button class="sbox ${on ? 'on' : ''} ${needs ? 'cam' : ''}" ${needs ? 'disabled' : `data-tick="${x.id}"`}>
         ${on ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
       </button>
-      <span class="stx2">${esc(x.text)}</span>
+      <span class="stx2">${esc(x.text)}
+        ${on && JOB.tickAt[x.id] ? `<span class="sat">${alt ? esc(alt) + ' · ' : ''}${hhmm(JOB.tickAt[x.id])}</span>`
+          : x.est_minutes ? `<span class="sest">${x.est_minutes} min</span>` : ''}</span>
+      ${x.alt_label && !on ? `<button class="salt" data-alt="${x.id}">${esc(x.alt_label)}</button>` : ''}
       ${x.photo_required ? (shot
         ? `<span class="shot">Photo ✓</span>`
         : `<button class="scam" data-photo="${x.id}">Photo</button>`) : ''}
@@ -542,8 +595,23 @@ function drawUnit(u) {
     `${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C`);
 }
 
+// the tick IS the timestamp — unticking clears it, re-ticking takes a new one
 function tick(id) {
-  JOB.ticked.has(id) ? JOB.ticked.delete(id) : JOB.ticked.add(id);
+  if (JOB.ticked.has(id)) {
+    JOB.ticked.delete(id); delete JOB.tickAt[id]; delete JOB.alts[id];
+  } else {
+    JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString();
+  }
+  saveDraft();
+  drawJob();
+}
+
+// "No delivery today" is a finished job, not a missed one
+function tickAlt(id) {
+  const x = JOB.items.find(s => s.id === id);
+  if (!x) return;
+  JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString(); JOB.alts[id] = x.alt_label;
+  saveDraft();
   drawJob();
 }
 
@@ -577,7 +645,9 @@ function takePhoto(stepId) {
         hold();
       }
       JOB.photos[stepId] = path;
-      if (stepId !== 'incident') JOB.ticked.add(stepId);
+      if (stepId !== 'incident') {
+        JOB.ticked.add(stepId); JOB.tickAt[stepId] = serverNow().toISOString(); saveDraft();
+      }
       toast('');
       drawJob();
     } catch (e) { toast(''); alert('Photo did not save: ' + e.message); }
@@ -728,7 +798,8 @@ async function submit(pin) {
     ];
   } else {
     args.p_steps = JOB.items.map(x => JOB.ticked.has(x.id)
-      ? { step_id: x.id, done: true, photo: JOB.photos[x.id] || null }
+      ? { step_id: x.id, done: true, photo: JOB.photos[x.id] || null,
+          at: JOB.tickAt[x.id] || null, reason: JOB.alts[x.id] || null }
       : { step_id: x.id, done: false });
   }
   // when it ACTUALLY happened. Survives a late sync — the server keeps
@@ -770,6 +841,7 @@ async function submit(pin) {
 
   const o = STATE.occ.find(x => x.id === JOB.occ.id);
   if (o) o.status = 'done';
+  dropDraft(JOB.occ.id);
   render();
 
   if (data.failures && data.failures.length) { corrective(data.failures, 0, data); return; }
@@ -960,6 +1032,7 @@ function celebrate(sub, hadFailure, offline) {
 function markDoneLocally() {
   const o = STATE.occ.find(x => x.id === JOB.occ.id);
   if (o) o.status = 'done';
+  dropDraft(JOB.occ.id);
   render();
 }
 
