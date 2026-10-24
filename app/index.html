@@ -338,6 +338,15 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .sat{color:var(--pass)}
 .salt{background:#fff;color:#3d3b38;border:1px solid var(--stone);font-family:inherit;font-size:14px;
   font-weight:500;padding:0 14px;flex:none;cursor:pointer;min-height:48px}
+/* signed, but with lines still to do — amber, and it stays up top */
+.row2.part{border:2px solid var(--warn);padding:0 13px}
+.row2.part .go2{background:var(--warn)}
+.row2.done.open{cursor:pointer}
+.step2.miss{background:#FBF6EC;border-color:#EAD9B5}
+.smiss{display:block;font-size:13px;font-weight:600;color:var(--warn);margin-top:3px}
+.line2{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--mist);
+  padding:14px 16px;margin-bottom:8px;font-size:16px}
+.line2 span:nth-child(2){flex:1}
 .prog2{flex:none;font-size:13px;font-weight:600;color:#5c5955;font-variant-numeric:tabular-nums}
 .pqs{width:44px;height:44px;flex:none;border:1px solid var(--stone);background:none;
   border-radius:50%;font-size:16px;color:#6d6a65;cursor:pointer}
@@ -395,6 +404,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

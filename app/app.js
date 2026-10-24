@@ -193,8 +193,13 @@ async function load() {
 
   STATE.occ = occ || [];
   pruneDrafts();
+  // who signed each done task, and how much of it is really done —
+  // a part-done task stays on the board until its last line is finished
+  const { data: dn } = await db.rpc('board_done', { p_date: todayLondon() });
+  STATE.done = {};
+  (dn || []).forEach(d => STATE.done[d.occurrence_id] = d);
   IDB.put('board', { k: 'last', stations: STATE.stations, shifts: STATE.shifts,
-    opensAt: STATE.opensAt,
+    opensAt: STATE.opensAt, done: STATE.done,
                      reminders: STATE.reminders, occ: STATE.occ,
                      date: todayLondon(), at: Date.now() }).catch(() => {});
   $('msg').classList.add('hide');
@@ -207,7 +212,7 @@ async function loadCached() {
     const c = await IDB.get('board', 'last');
     if (!c || c.date !== todayLondon()) return false;
     STATE.stations = c.stations; STATE.shifts = c.shifts; STATE.opensAt = c.opensAt;
-    STATE.reminders = c.reminders; STATE.occ = c.occ;
+    STATE.reminders = c.reminders; STATE.occ = c.occ; STATE.done = c.done || {};
     $('msg').classList.add('hide');
     render();
     return true;
@@ -239,6 +244,12 @@ function urgency(o, now) {
   if (o.appears_at && new Date(o.appears_at) <= now) return 'due';
   if (mins <= 120) return 'next';   // the next couple of hours
   return 'later';
+}
+
+// signed off, but with lines left undone and not yet finished
+function partDone(o) {
+  const d = STATE.done && STATE.done[o.id];
+  return o.status === 'done' && !!d && d.total > 0 && d.done < d.total;
 }
 
 function render() {
@@ -306,7 +317,9 @@ function render() {
   STATE.stations.forEach(st => {
     const mine  = STATE.occ.filter(o => o.station_id === st.id && o.checks.kind !== 'incident');
     const open  = mine.filter(o => o.status === 'pending');
-    const shut  = mine.filter(o => o.status !== 'pending');
+    // signed, but with lines still to do: it stays up top until finished
+    const part  = mine.filter(o => partDone(o));
+    const shut  = mine.filter(o => o.status !== 'pending' && !partDone(o));
     const u     = o => urgency(o, now);
     const byTime = (a, b) => ((a.due_at || '9') < (b.due_at || '9') ? -1 : 1);
 
@@ -314,6 +327,17 @@ function render() {
     const nextG  = open.filter(o => u(o) === 'next').sort(byTime);
     const laterG = open.filter(o => u(o) === 'later').sort(byTime);
     const pct = mine.length ? Math.round(shut.filter(o=>o.status==='done').length / mine.length * 100) : 0;
+    const partRow = o => {
+      const d = STATE.done[o.id];
+      const b = document.createElement('button');
+      b.className = 'row2 part';
+      b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
+        <span class="n2">${esc(o.checks.name)}</span>
+        <span class="prog2">${d.done} of ${d.total}</span>
+        <span class="go2">Finish</span>`;
+      b.onclick = () => openDone(o);
+      return b;
+    };
 
     const col = document.createElement('div');
     col.className = 'col';
@@ -376,20 +400,33 @@ function render() {
     };
 
     group('Now', 'gnow', nowG);
+    if (part.length) {
+      if (!nowG.length) sc.insertAdjacentHTML('beforeend',
+        `<div class="glab2 gnow">Now<span class="ln"></span></div>`);
+      part.sort(byTime).forEach(o => sc.appendChild(partRow(o)));
+    }
     group('Next up', 'gnext', nextG, '');
     group('Later today', 'glater', laterG, 'dim');
 
     if (shut.length) {
       sc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done<span class="ln"></span></div>`);
-      shut.sort(byTime).forEach(o => sc.insertAdjacentHTML('beforeend',
-        `<div class="row2 done"><span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
+      shut.sort(byTime).forEach(o => {
+        const d = STATE.done[o.id];
+        const b = document.createElement(o.status === 'done' ? 'button' : 'div');
+        b.className = 'row2 done' + (o.status === 'done' ? ' open' : '');
+        b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
          ${o.status === 'done'
            ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>'
            : '<span class="dot fail"></span>'}
          <span class="n2">${esc(o.checks.name)}</span>
-         <span class="rm">${o.status === 'missed' ? 'missed' : o.status === 'expired' ? '' : 'signed'}</span></div>`));
+         <span class="rm">${o.status === 'missed' ? 'missed' : o.status === 'expired' ? ''
+           : d ? esc(d.signed_by) + ' · ' + hhmm(d.signed_at) : 'signed'}</span>`;
+        // a signed task can always be looked at again
+        if (o.status === 'done') b.onclick = () => openDone(o);
+        sc.appendChild(b);
+      });
     }
-    if (!open.length) {
+    if (!open.length && !part.length) {
       sc.insertAdjacentHTML('afterbegin',
         `<div class="glab2 gnext">All done<span class="ln"></span></div>
          <div class="row2 done"><span class="n2">Nothing outstanding on this side.</span></div>`);
@@ -487,6 +524,131 @@ async function openCheck(o) {
     }
   }
   drawJob();
+}
+
+/* ------------------------------------------------- a signed task, again */
+
+/* Opening a task that has already been signed. The record itself never
+   changes — anything left undone is finished as an ADDITION, with its own
+   time and its own PIN, until the end of that day. */
+async function openDone(o) {
+  JOB = { occ: o, kind: 'review', rec: null, ticked: new Set(), tickAt: {} };
+  sheet().classList.add('open');
+  panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
+    <p class="pmeta">Loading…</p></div>`;
+  let data, error;
+  try { ({ data, error } = await db.rpc('record_detail', { p_occurrence: o.id })); }
+  catch (e) { error = e; }
+  if (error || !data || !data.ok) {
+    panel().innerHTML = `<div class="phead"><button class="pback">← Back</button>
+      <div class="ptitle">Could not open it</div>
+      <p class="pmeta">${esc(error ? 'No connection — try again when the wifi is back'
+                                   : (data && data.error) || 'Unknown error')}</p></div>`;
+    panel().querySelector('.pback').onclick = closeSheet;
+    return;
+  }
+  JOB.rec = data;
+  drawDone();
+}
+
+function drawDone() {
+  const o = JOB.occ, R = JOB.rec;
+  const steps = R.steps || [];
+  const missing = steps.filter(x => !x.done && !x.later_at);
+  const doneN = steps.length - missing.length;
+
+  const stepRow = (x, i) => {
+    const was = x.done || x.later_at;
+    const now = JOB.ticked.has(x.step_id);
+    const canTick = !was && R.can_finish && !x.photo_required;
+    const note = x.done
+      ? `${x.reason ? esc(x.reason) + ' · ' : ''}${hhmm(x.done_at)}`
+      : x.later_at ? `Finished later · ${hhmm(x.later_at)} by ${esc(x.later_by)}`
+      : now ? `Done now · ${hhmm(JOB.tickAt[x.step_id])}`
+      : x.photo_required && R.can_finish ? 'Not done — needs a photo, ask a manager'
+      : 'Not done';
+    const has = x.guidance || x.guidance_image;
+    return `<div class="step2 ${was || now ? 'on' : 'miss'}">
+        <span class="snum">${i + 1}</span>
+        <button class="sbox ${was || now ? 'on' : ''}" ${canTick ? `data-tick="${x.step_id}"` : 'disabled'}>
+          ${was || now ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
+        </button>
+        <span class="stx2">${esc(x.text)}
+          <span class="${was || now ? 'sat' : 'smiss'}">${note}</span></span>
+        ${has ? `<button class="pqs" data-guide="${x.step_id}">?</button>` : ''}
+      </div>
+      ${has ? `<div class="guide" id="g${x.step_id}">
+          ${x.guidance ? `<p>${esc(x.guidance)}</p>` : ''}
+          ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
+        </div>` : ''}`;
+  };
+  const readRow = r => `<div class="line2"><span class="dot ${r.skipped ? '' : r.passed ? 'pass' : 'fail'}"></span>
+      <span>${esc(r.name)}</span>
+      <b>${r.skipped ? esc(r.reason || 'n/a') : r.value + '°C'}</b></div>`;
+  const countRow = c => `<div class="line2"><span class="dot ${c.low ? 'fail' : 'pass'}"></span>
+      <span>${esc(c.name)}</span><b>${c.qty}${c.unit_label ? ' ' + esc(c.unit_label) : ''}</b></div>`;
+
+  const n = JOB.ticked.size;
+  panel().innerHTML = `
+    <div class="jprog">
+      <button class="pback">← Back</button>
+      <div class="jtop"><b>${esc(o.checks.name)}</b>
+        ${steps.length ? `<span>${doneN + n} / ${steps.length}</span>` : ''}</div>
+      ${steps.length ? `<div class="ctrack"><i style="width:${Math.round((doneN + n) / steps.length * 100)}%"></i></div>` : ''}
+    </div>
+    <div class="pintro">Signed off by <b>${esc(R.signed_by)}</b> at ${hhmm(R.signed_at)}${
+      R.was_late ? ` · ${R.minutes_late} min late` : ''}${
+      missing.length && R.can_finish ? '. Anything not done can still be finished today — tick it, then sign with your PIN.'
+      : missing.length ? '. This was a previous day, so it can no longer be finished.' : '.'}</div>
+    <div class="pbody">
+      ${steps.map(stepRow).join('')}
+      ${(R.readings || []).map(readRow).join('')}
+      ${(R.counts || []).map(countRow).join('')}
+    </div>
+    ${missing.length && R.can_finish ? `<div class="pfoot">
+      <button class="signbtn ${n ? '' : 'off'}" ${n ? '' : 'disabled'}>
+        ${n ? `Finish ${n} with your PIN` : `${missing.length} not done — tick what you've finished`}
+      </button></div>` : ''}`;
+
+  panel().querySelector('.pback').onclick = closeSheet;
+  panel().querySelectorAll('[data-tick]').forEach(b => b.onclick = () => {
+    const id = b.dataset.tick;
+    if (JOB.ticked.has(id)) { JOB.ticked.delete(id); delete JOB.tickAt[id]; }
+    else { JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString(); }
+    drawDone();
+  });
+  panel().querySelectorAll('[data-guide]').forEach(b => b.onclick = () =>
+    $('g' + b.dataset.guide).classList.toggle('open'));
+  const sb = panel().querySelector('.signbtn:not(.off)');
+  if (sb) sb.onclick = () => askPin(finishLater);
+}
+
+async function finishLater(pin) {
+  const args = { p_pin: pin, p_occurrence: JOB.occ.id,
+    p_steps: [...JOB.ticked].map(step_id => ({ step_id, at: JOB.tickAt[step_id] })),
+    p_recorded_at: serverNow().toISOString() };
+  const n = JOB.ticked.size;
+  const offlineDone = async () => {
+    await queueSubmission(args, [], 'finish_steps');
+    closeSheet();
+    toast(`Saved on this iPad — ${n} will send when the wifi is back`);
+    setTimeout(() => toast(''), 3500);
+    return {};
+  };
+  if (!navigator.onLine) return offlineDone();
+
+  let data, error;
+  try { ({ data, error } = await db.rpc('finish_steps', args)); } catch (e) { error = e; }
+  if (error && (!navigator.onLine || /fetch|network|failed/i.test(error.message || ''))) return offlineDone();
+  if (error) return { error: error.message };
+  if (!data.ok) return { error: data.error };
+
+  closeSheet();
+  toast(data.left ? `Finished by ${data.signed_by} — ${data.left} still not done`
+                  : `All done — finished by ${data.signed_by}`);
+  setTimeout(() => toast(''), 3500);
+  await load();
+  return {};
 }
 
 function drawJob() {
@@ -1271,9 +1433,10 @@ window.addEventListener('online',  () => { ONLINE = true;  refreshQueueBadge(); 
 window.addEventListener('offline', () => { ONLINE = false; refreshQueueBadge(); });
 
 /* a submission that could not reach the server, kept until it can */
-async function queueSubmission(args, photoBlobs) {
+async function queueSubmission(args, photoBlobs, rpc) {
   const id = 'q' + Date.now() + Math.random().toString(16).slice(2);
-  await IDB.put('queue', { id, args, photoBlobs: photoBlobs || [], at: Date.now() });
+  await IDB.put('queue', { id, args, photoBlobs: photoBlobs || [], at: Date.now(),
+                           rpc: rpc || 'submit_check' });
   await refreshQueueBadge();
   return id;
 }
@@ -1301,7 +1464,7 @@ async function flushQueue() {
           if (st) st.photo = ph.path;
         }
       }
-      const { data, error } = await db.rpc('submit_check', args);
+      const { data, error } = await db.rpc(it.rpc || 'submit_check', args);
       if (error) throw error;
       // a rejection from the server is final — keeping it would retry forever
       await IDB.del('queue', it.id);
