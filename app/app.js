@@ -161,6 +161,14 @@ async function load() {
   STATE.testing = !!site && site.length > 0 && !site[0].go_live;
 
   STATE.stations = (area.stations || []).sort((a, b) => a.sort - b.sort);
+  // A screen can belong to ONE station — the guides' iPad, the makers'
+  // iPad. Set remotely in Devices; empty means the whole floor.
+  const { data: scr } = await db.rpc('my_screen');
+  STATE.solo = null;
+  if (!VIEWING && scr && scr.station_id) {
+    const only = STATE.stations.find(s => s.id === scr.station_id);
+    if (only) { STATE.stations = [only]; STATE.solo = only.id; }
+  }
   STATE.shifts = (area.shifts || []).sort((a, b) => a.sort - b.sort);
   STATE.opensAt = site && site[0] ? site[0].opens_at : null;
 
@@ -199,7 +207,7 @@ async function load() {
   STATE.done = {};
   (dn || []).forEach(d => STATE.done[d.occurrence_id] = d);
   IDB.put('board', { k: 'last', stations: STATE.stations, shifts: STATE.shifts,
-    opensAt: STATE.opensAt, done: STATE.done,
+    opensAt: STATE.opensAt, done: STATE.done, solo: STATE.solo,
                      reminders: STATE.reminders, occ: STATE.occ,
                      date: todayLondon(), at: Date.now() }).catch(() => {});
   $('msg').classList.add('hide');
@@ -212,7 +220,7 @@ async function loadCached() {
     const c = await IDB.get('board', 'last');
     if (!c || c.date !== todayLondon()) return false;
     STATE.stations = c.stations; STATE.shifts = c.shifts; STATE.opensAt = c.opensAt;
-    STATE.reminders = c.reminders; STATE.occ = c.occ; STATE.done = c.done || {};
+    STATE.reminders = c.reminders; STATE.occ = c.occ; STATE.done = c.done || {}; STATE.solo = c.solo || null;
     $('msg').classList.add('hide');
     render();
     return true;
@@ -340,7 +348,7 @@ function render() {
     };
 
     const col = document.createElement('div');
-    col.className = 'col';
+    col.className = 'col' + (STATE.solo ? ' solo' : '');
     col.innerHTML = `<div class="chead2">
         <div class="ctop"><span class="cname2">${esc(st.name)}</span>
           <span class="ccount">${shut.filter(o=>o.status==='done').length} / ${mine.length}</span></div>
@@ -408,8 +416,12 @@ function render() {
     group('Next up', 'gnext', nextG, '');
     group('Later today', 'glater', laterG, 'dim');
 
+    // one station on the screen: done gets its own column, so finished
+    // work is always visible without pushing the to-do list down
+    const dc = STATE.solo ? document.createElement('div') : sc;
+    if (STATE.solo) dc.className = 'scroll donecol';
     if (shut.length) {
-      sc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done<span class="ln"></span></div>`);
+      dc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done today<span class="ln"></span></div>`);
       shut.sort(byTime).forEach(o => {
         const d = STATE.done[o.id];
         const b = document.createElement(o.status === 'done' ? 'button' : 'div');
@@ -423,8 +435,11 @@ function render() {
            : d ? esc(d.signed_by) + ' · ' + hhmm(d.signed_at) : 'signed'}</span>`;
         // a signed task can always be looked at again
         if (o.status === 'done') b.onclick = () => openDone(o);
-        sc.appendChild(b);
+        dc.appendChild(b);
       });
+    } else if (STATE.solo) {
+      dc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done today<span class="ln"></span></div>
+        <div class="row2 done"><span class="n2">Nothing signed yet today.</span></div>`);
     }
     if (!open.length && !part.length) {
       sc.insertAdjacentHTML('afterbegin',
@@ -432,6 +447,7 @@ function render() {
          <div class="row2 done"><span class="n2">Nothing outstanding on this side.</span></div>`);
     }
     col.appendChild(sc);
+    if (STATE.solo) col.appendChild(dc);
     cols.appendChild(col);
   });
 

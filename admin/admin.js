@@ -902,18 +902,32 @@ async function viewDevices() {
   m.innerHTML = `<h1>Devices</h1><p class="sub">Loading…</p>`;
 
   const { data: devs, error } = await db.from('devices')
-    .select(`id,name,active,last_seen,areas(name,sort),
+    .select(`id,name,active,last_seen,area_id,station_id,areas(name,sort),
              device_links(id,user_agent,paired_at,last_seen,active,revoked_at,revoked_by),
              device_codes(id,code,created_at,used_at,voided_at)`)
     .eq('active', true);
   if (error) return m.innerHTML = `<h1>Devices</h1><div class="empty">${esc(error.message)}</div>`;
 
   devs.sort((a,b) => (a.areas?.sort ?? 0) - (b.areas?.sort ?? 0));
+  const { data: areas } = await db.from('areas').select('id,name,sort,stations(id,name,sort)').order('sort');
   const mins = t => t ? Math.round((Date.now() - new Date(fixIso(t))) / 60000) : null;
 
   let html = `<h1>Devices</h1>
     <p class="sub">Every screen, who is linked to it, and how to get a screen
-       running again — all from here, wherever you are.</p>`;
+       running again — all from here, wherever you are.</p>
+    <div class="devbar" style="margin:0 0 18px"><span style="flex:1"></span>
+      <button class="btn cta" id="addscreen">+ Add a screen</button></div>`;
+  // which station a screen shows — the whole floor, or one side of it
+  const showsSel = d => {
+    const st = ((areas || []).find(a => a.id === d.area_id)?.stations || [])
+      .sort((a, b) => a.sort - b.sort);
+    if (st.length < 2) return '';
+    return `<label class="rm" style="display:flex;align-items:center;gap:8px;margin-bottom:12px">Shows
+      <select class="finp sm" data-shows="${d.id}" style="width:auto">
+        <option value="">All stations on this floor</option>
+        ${st.map(s => `<option value="${s.id}" ${s.id === d.station_id ? 'selected' : ''}>${esc(s.name)} only</option>`).join('')}
+      </select></label>`;
+  };
 
   devs.forEach(d => {
     const live = (d.device_links || []).filter(l => l.active);
@@ -931,7 +945,8 @@ async function viewDevices() {
           : extra ? `<span class="chip fail">⚠ ${live.length} devices linked</span>`
           : quiet ? '<span class="chip warn">Not checked in recently</span>'
           : '<span class="chip pass">Linked and live</span>'}</span>
-      </div>`;
+      </div>
+      ${showsSel(d)}`;
 
     if (!live.length) {
       html += `<div class="empty">No device is linked. Give someone a code below.</div>`;
@@ -969,6 +984,33 @@ async function viewDevices() {
   });
 
   m.innerHTML = html;
+  m.querySelectorAll('[data-shows]').forEach(sel => sel.onchange = async () => {
+    const d = devs.find(x => x.id === sel.dataset.shows);
+    const label = sel.options[sel.selectedIndex].text;
+    if (!confirm(`${d.name} will show: ${label}.\n\nThe screen changes within about 2 minutes. Nothing signed is affected.`)) {
+      sel.value = d.station_id || ''; return;
+    }
+    const { error } = await db.from('devices').update({ station_id: sel.value || null }).eq('id', d.id);
+    if (error) return alert(error.message);
+    await db.from('ops_activity').insert({ actor: (await db.auth.getUser()).data.user?.email,
+      verb: 'device_station_set', detail: d.name + ' → ' + label });
+    viewDevices();
+  });
+  $('addscreen').onclick = async () => {
+    const name = prompt('Name the new screen (e.g. Service — Makers iPad)');
+    if (!name || !name.trim()) return;
+    const list = (areas || []).map((a, i) => `${i + 1}. ${a.name}`).join('\n');
+    const pick = prompt(`Which floor is it on?\n\n${list}\n\nType the number:`, '1');
+    const area = (areas || [])[parseInt(pick, 10) - 1];
+    if (!area) return;
+    const { data: dev, error } = await db.from('devices')
+      .insert({ area_id: area.id, name: name.trim() }).select('id').single();
+    if (error) return alert(error.message);
+    await db.rpc('issue_device_codes', { p_device: dev.id, p_count: 5 });
+    await db.from('ops_activity').insert({ actor: (await db.auth.getUser()).data.user?.email,
+      verb: 'device_added', detail: name.trim() + ' (' + area.name + ')' });
+    viewDevices();
+  };
   m.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
     if (!confirm(
 `Unlink this device?
