@@ -419,6 +419,12 @@ async function builder(checkId) {
       const tbl = B.kind === 'temperature' ? 'units' : B.kind === 'count' ? 'count_items' : 'steps';
       const { data: items } = await db.from(tbl).select('*').eq('check_version_id', B.versionId).order('sort');
       B.items = (items || []).map(x => ({ ...x }));
+      // a checklist line can carry temperature readings (Opening's line 8)
+      if (B.kind === 'checklist') {
+        const { data: un } = await db.from('units').select('*').eq('check_version_id', B.versionId).order('sort');
+        B.items.forEach(it => it.temps = (un || []).filter(u => u.step_id === it.id)
+          .map(u => ({ name: u.name, limit_kind: u.limit_kind, limit_c: u.limit_c, basis: u.basis, guidance: u.guidance })));
+      }
     }
   }
   drawBuilder();
@@ -535,6 +541,16 @@ function itemRow(it, i) {
         <button class="del" data-del="${i}">✕</button>
       </div>
       <input class="finp tiny" data-i="${i}" data-f="guidance" value="${esc(it.guidance || '')}" placeholder="How to do it — shown behind the ? (optional)">
+      ${(it.temps || []).map((t, j) => `<div class="irow" style="margin:6px 0 0">
+        <span class="deg">🌡</span>
+        <input class="finp" data-ti="${i}" data-tj="${j}" data-tf="name" value="${esc(t.name)}" placeholder="e.g. Cold bain marie">
+        <select class="finp sm" data-ti="${i}" data-tj="${j}" data-tf="limit_kind">
+          <option value="max" ${t.limit_kind === 'max' ? 'selected' : ''}>no more than</option>
+          <option value="min" ${t.limit_kind === 'min' ? 'selected' : ''}>at least</option></select>
+        <input class="finp sm" type="number" step="0.1" data-ti="${i}" data-tj="${j}" data-tf="limit_c" value="${esc(t.limit_c)}">
+        <span class="deg">°C</span>
+        <button class="del" data-tdel="${i}:${j}">✕</button></div>`).join('')}
+      <button class="tiny" data-tadd="${i}">+ Add a temperature reading to this line</button>
       <div class="inline">
         <input class="finp sm" type="number" min="0" data-i="${i}" data-f="est_minutes" value="${esc(it.est_minutes ?? '')}" placeholder="min">
         <span class="deg">min</span>
@@ -605,6 +621,19 @@ function bindItems(p) {
   });
   p.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
     B.items.splice(+b.dataset.del, 1); drawBuilder();
+  });
+  p.querySelectorAll('[data-tadd]').forEach(b => b.onclick = () => {
+    const it = B.items[+b.dataset.tadd];
+    (it.temps = it.temps || []).push({ name: '', limit_kind: 'max', limit_c: 8, basis: 'Chilled storage', guidance: null });
+    drawBuilder();
+  });
+  p.querySelectorAll('[data-tdel]').forEach(b => b.onclick = () => {
+    const [i, j] = b.dataset.tdel.split(':').map(Number);
+    B.items[i].temps.splice(j, 1); drawBuilder();
+  });
+  p.querySelectorAll('[data-tf]').forEach(el => el.oninput = el.onchange = e => {
+    const t = B.items[+e.target.dataset.ti].temps[+e.target.dataset.tj], f = e.target.dataset.tf;
+    t[f] = f === 'limit_c' ? parseFloat(e.target.value) : e.target.value;
   });
 }
 
@@ -677,8 +706,21 @@ async function publish() {
           guidance: it.guidance || null, guidance_image: it.guidance_image || null,
           est_minutes: it.est_minutes ?? null, alt_label: (it.alt_label || '').trim() || null };
       });
-      const { error } = await db.from(tbl).insert(rows);
+      const { data: made, error } = await db.from(tbl).insert(rows).select('id,sort');
       if (error) throw error;
+      if (B.kind === 'checklist') {
+        const temps = [];
+        B.items.forEach((it, i) => (it.temps || []).filter(t => (t.name || '').trim()).forEach((t, j) => {
+          const step = (made || []).find(m => m.sort === i + 1);
+          if (step) temps.push({ check_version_id: ver.id, step_id: step.id, sort: temps.length + 1,
+            name: t.name.trim(), limit_kind: t.limit_kind, limit_c: t.limit_c,
+            basis: t.basis || 'Chilled storage', guidance: t.guidance || null });
+        }));
+        if (temps.length) {
+          const { error: te } = await db.from('units').insert(temps);
+          if (te) throw te;
+        }
+      }
     }
 
     if (B.kind !== 'reminder') {

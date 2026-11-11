@@ -662,7 +662,9 @@ function drafts() {
 function saveDraft() {
   if (!JOB || JOB.kind !== 'checklist') return;
   const all = drafts();
-  if (JOB.ticked.size) all[JOB.occ.id] = { at: JOB.tickAt, alts: JOB.alts, total: JOB.items.length };
+  const hasRead = Object.keys(JOB.values).length || Object.keys(JOB.skips).length;
+  if (JOB.ticked.size || hasRead) all[JOB.occ.id] = { at: JOB.tickAt, alts: JOB.alts, total: JOB.items.length,
+    vals: JOB.values, skips: JOB.skips, readAt: JOB.readAt };
   else delete all[JOB.occ.id];
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify(all)); } catch {}
 }
@@ -682,7 +684,7 @@ function pruneDrafts() {
 
 async function openCheck(o, inline) {
   const job = JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
-          tickAt: {}, alts: {}, inline: !!inline };
+          tickAt: {}, alts: {}, readAt: {}, units: [], inline: !!inline };
   if (!inline) sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
@@ -700,6 +702,13 @@ async function openCheck(o, inline) {
         .eq('check_version_id', o.check_version_id).order('sort');
   const { data, error } = await q;
   if (JOB !== job) return;   // something else was opened while this loaded
+  if (!error && k === 'checklist') {
+    const { data: un } = await db.from('units')
+      .select('id,sort,name,limit_kind,limit_c,basis,guidance,guidance_image,step_id')
+      .eq('check_version_id', o.check_version_id).order('sort');
+    if (JOB !== job) return;
+    JOB.units = (un || []).filter(x => x.step_id);
+  }
   if (error) { panel().innerHTML = `<div class="phead"><div class="ptitle">Could not load</div>
     <p class="pmeta">${esc(error.message)}</p></div>`; return; }
 
@@ -711,6 +720,10 @@ async function openCheck(o, inline) {
       JOB.ticked.add(id); JOB.tickAt[id] = at;
       if (d.alts && d.alts[id]) JOB.alts[id] = d.alts[id];
     }
+    const uids = new Set(JOB.units.map(x => x.id));
+    for (const [id, v] of Object.entries(d.vals || {})) if (uids.has(id)) JOB.values[id] = v;
+    for (const [id, r] of Object.entries(d.skips || {})) if (uids.has(id)) JOB.skips[id] = r;
+    for (const [id, t] of Object.entries(d.readAt || {})) if (uids.has(id)) JOB.readAt[id] = t;
   }
   drawJob();
 }
@@ -750,11 +763,12 @@ function drawDone() {
   const stepRow = (x, i) => {
     const was = x.done || x.later_at;
     const now = JOB.ticked.has(x.step_id);
-    const canTick = !was && R.can_finish && !x.photo_required;
+    const canTick = !was && R.can_finish && !x.photo_required && !x.has_temps;
     const note = x.done
       ? `${x.reason ? esc(x.reason) + ' · ' : ''}${hhmm(x.done_at)}`
       : x.later_at ? `Finished later · ${hhmm(x.later_at)} by ${esc(x.later_by)}`
       : now ? `Done now · ${hhmm(JOB.tickAt[x.step_id])}`
+      : x.has_temps ? 'Not done — readings can’t be added after sign-off'
       : x.photo_required && R.can_finish ? 'Not done — needs a photo, ask a manager'
       : 'Not done';
     const has = x.guidance || x.guidance_image;
@@ -844,6 +858,7 @@ async function finishLater(pin) {
 function drawJob() {
   const o = JOB.occ, k = JOB.kind;
   if (k === 'incident') return drawIncident();
+  if (k === 'checklist') syncTempLines();
   const body = k === 'temperature' ? JOB.items.map(drawUnit).join('')
              : k === 'count'       ? JOB.items.map(drawCount).join('')
              :                       JOB.items.map((x,i) => drawStep(x,i)).join('');
@@ -907,15 +922,37 @@ function lockJob(o, redraw) {
   setTimeout(() => { if (JOB === job && !document.querySelector('.ov')) redraw(); }, wait);
 }
 
+/* A checklist line with temperatures on it (Opening's line 8) is not
+   ticked by hand: it is done when every unit has a reading, and its time
+   is the time of the last reading. Clearing a reading unticks it. */
+function tempsOf(stepId) { return (JOB.units || []).filter(u => u.step_id === stepId); }
+function syncTempLines() {
+  let changed = false;
+  JOB.items.forEach(x => {
+    const us = tempsOf(x.id);
+    if (!us.length) return;
+    const all = us.every(u => JOB.values[u.id] !== undefined || JOB.skips[u.id]);
+    if (all && !JOB.ticked.has(x.id)) {
+      JOB.ticked.add(x.id);
+      JOB.tickAt[x.id] = us.map(u => JOB.readAt[u.id]).filter(Boolean).sort().pop() || serverNow().toISOString();
+      changed = true;
+    } else if (!all && JOB.ticked.has(x.id)) {
+      JOB.ticked.delete(x.id); delete JOB.tickAt[x.id]; changed = true;
+    }
+  });
+  if (changed) saveDraft();
+}
+
 function drawStep(x, i) {
   const on = JOB.ticked.has(x.id);
   const shot = JOB.photos[x.id];
   const needs = x.photo_required && !shot;
   const has = x.guidance || x.guidance_image;
   const alt = JOB.alts[x.id];
-  return `<div class="step2 ${on ? 'on' : ''}">
+  const temps = tempsOf(x.id);
+  return `<div class="step2 ${on ? 'on' : ''} ${temps.length ? 'hastemps' : ''}">
       <span class="snum">${i + 1}</span>
-      <button class="sbox ${on ? 'on' : ''} ${needs ? 'cam' : ''}" ${needs ? 'disabled' : `data-tick="${x.id}"`}>
+      <button class="sbox ${on ? 'on' : ''} ${needs ? 'cam' : ''}" ${needs || temps.length ? 'disabled' : `data-tick="${x.id}"`}>
         ${on ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
       </button>
       <span class="stx2">${esc(x.text)}
@@ -930,7 +967,8 @@ function drawStep(x, i) {
     ${has ? `<div class="guide" id="g${x.id}">
         ${x.guidance ? `<p>${esc(x.guidance)}</p>` : ''}
         ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
-      </div>` : ''}`;
+      </div>` : ''}
+    ${temps.length ? `<div class="steptemps">${temps.map(drawUnit).join('')}</div>` : ''}`;
 }
 
 /* One row builder for temperatures and counts. Same shape as a checklist
@@ -1048,7 +1086,7 @@ function shrink(file, max = 1200, q = 0.7) {
 /* ------------------------------------------------------ temperature pad */
 
 function keypad(unitId) {
-  const u = JOB.items.find(x => x.id === unitId);
+  const u = (JOB.units || []).find(x => x.id === unitId) || JOB.items.find(x => x.id === unitId);
   let buf = '';
   const ov = document.createElement('div');
   ov.className = 'ov';
@@ -1077,7 +1115,11 @@ function keypad(unitId) {
     ov.querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
       const k = b.dataset.k;
       if (k === 'del') buf = buf.slice(0, -1);
-      else if (k === 'ok') { JOB.values[unitId] = parseFloat(buf); ov.remove(); drawJob(); return; }
+      else if (k === 'ok') {
+        JOB.values[unitId] = parseFloat(buf); delete JOB.skips[unitId];
+        JOB.readAt[unitId] = serverNow().toISOString();   // the moment it was read
+        saveDraft(); ov.remove(); drawJob(); return;
+      }
       else if (k === '-') buf = buf.startsWith('-') ? buf.slice(1) : '-' + buf;
       else if (k === '.' && buf.includes('.')) { /* one only */ }
       else buf += k;
@@ -1097,6 +1139,7 @@ function keypad(unitId) {
         <button class="padcancel">Back</button></div>`;
       ov.querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
         JOB.skips[unitId] = b.dataset.r;
+        JOB.readAt[unitId] = serverNow().toISOString();
         delete JOB.values[unitId];
         ov.remove(); drawJob();
       });
@@ -1168,6 +1211,10 @@ async function submit(pin) {
       ? { step_id: x.id, done: true, photo: JOB.photos[x.id] || null,
           at: JOB.tickAt[x.id] || null, reason: JOB.alts[x.id] || null }
       : { step_id: x.id, done: false });
+    if ((JOB.units || []).length) args.p_readings = [
+      ...Object.entries(JOB.values).map(([unit_id, value]) => ({ unit_id, value, at: JOB.readAt[unit_id] || null })),
+      ...Object.entries(JOB.skips).map(([unit_id, reason]) => ({ unit_id, skipped: true, reason, at: JOB.readAt[unit_id] || null }))
+    ];
   }
   // when it ACTUALLY happened. Survives a late sync — the server keeps
   // both this and its own arrival time.
@@ -1233,7 +1280,7 @@ function corrective(fails, i, sub) {
      Dairy and Prepped salads, insults the person holding the probe.
      "Walk-in chiller 12°C" genuinely does not: a chiller holds twenty
      things and the law wants to know which of them were at risk. */
-  const unit    = (JOB && JOB.items || []).find(x => x.name === f.unit) || {};
+  const unit    = (JOB ? [...(JOB.items || []), ...(JOB.units || [])] : []).find(x => x.name === f.unit) || {};
   const store   = /storage|chiller|freez|fridge|ambient/i.test(unit.basis || f.unit || '');
   const cooking = /cooking|calibrat|probe|core/i.test(unit.basis || f.unit || '');
   const knowsFood = !store && !cooking;          // the unit IS the food
