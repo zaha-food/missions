@@ -213,13 +213,20 @@ async function load() {
 
   STATE.occ = occ || [];
   pruneDrafts();
+  const lists = [...new Set(STATE.occ.filter(o => o.checks.kind === 'checklist').map(o => o.check_version_id))];
+  STATE.estByVer = {};
+  if (lists.length) {
+    const { data: se } = await db.from('steps').select('check_version_id,est_minutes').in('check_version_id', lists);
+    (se || []).forEach(x => { if (x.est_minutes) STATE.estByVer[x.check_version_id] =
+      (STATE.estByVer[x.check_version_id] || 0) + x.est_minutes; });
+  }
   // who signed each done task, and how much of it is really done —
   // a part-done task stays on the board until its last line is finished
   const { data: dn } = await db.rpc('board_done', { p_date: todayLondon() });
   STATE.done = {};
   (dn || []).forEach(d => STATE.done[d.occurrence_id] = d);
   IDB.put('board', { k: 'last', stations: STATE.stations, shifts: STATE.shifts,
-    opensAt: STATE.opensAt, done: STATE.done, solo: STATE.solo,
+    opensAt: STATE.opensAt, done: STATE.done, solo: STATE.solo, estByVer: STATE.estByVer,
                      reminders: STATE.reminders, occ: STATE.occ,
                      date: todayLondon(), at: Date.now() }).catch(() => {});
   $('msg').classList.add('hide');
@@ -232,7 +239,7 @@ async function loadCached() {
     const c = await IDB.get('board', 'last');
     if (!c || c.date !== todayLondon()) return false;
     STATE.stations = c.stations; STATE.shifts = c.shifts; STATE.opensAt = c.opensAt;
-    STATE.reminders = c.reminders; STATE.occ = c.occ; STATE.done = c.done || {}; STATE.solo = c.solo || null;
+    STATE.reminders = c.reminders; STATE.occ = c.occ; STATE.done = c.done || {}; STATE.solo = c.solo || null; STATE.estByVer = c.estByVer || {};
     $('msg').classList.add('hide');
     render();
     return true;
@@ -506,65 +513,97 @@ function renderSolo(now, worstId, lateAgo) {
     STATE.focusId = f ? f.id : null;
   }
 
-  // the day, on the right
+  // the day, on the right — drawn as a timeline: a rail of times, a NOW
+  // line that moves down it, gaps that follow the clock, long tasks drawn
+  // taller, and done tasks left where they happened
   const DR = drafts();
-  const row = (o, cls, right) => {
-    const b = document.createElement('button');
-    b.className = 'row2 ' + cls + (f && o.id === f.id ? ' sel' : '')
-      + (u(o) === 'late' && o.id === worstId ? ' worst' : '');
-    b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
-      <span class="n2">${esc(o.checks.name)}</span>${right || ''}`;
-    b.onclick = () => { STATE.focusId = o.id; render(); };
-    return b;
-  };
+  const est = o => STATE.estByVer[o.check_version_id] || o.checks.est_minutes || null;
+  const mins = iso => { const d = new Date(iso); return d.getTime() / 60000; };
+  const nowM = now.getTime() / 60000;
   const dl = $('daylist');
   const keep = dl.scrollTop;
   dl.innerHTML = '';
-  const label = (t, cls) => dl.insertAdjacentHTML('beforeend', `<div class="glab2 ${cls}">${t}<span class="ln"></span></div>`);
-  const nowG   = open.filter(o => ['due', 'late'].includes(u(o)) || !o.due_at).sort(byTime);
-  const nextG  = open.filter(o => u(o) === 'next').sort(byTime);
-  const laterG = open.filter(o => u(o) === 'later' && o.due_at).sort(byTime);
-  const tag = o => {
-    const d = DR[o.id], got = d ? Object.keys(d.at || {}).length : 0;
-    if (f && o.id === f.id) return `<span class="onscr">On screen</span>`;
-    if (got) return `<span class="prog2">${got} of ${d.total}</span>`;
-    return u(o) === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : '';
-  };
-  if (nowG.length || part.length) {
-    label('Now', 'gnow');
-    nowG.forEach(o => dl.appendChild(row(o, u(o) === 'late' ? 'late' : 'now', tag(o))));
-    part.sort(byTime).forEach(o => {
-      const d = STATE.done[o.id];
-      dl.appendChild(row(o, 'part', f && o.id === f.id ? tag(o) : `<span class="prog2">${d.done} of ${d.total}</span>`));
-    });
-  }
-  if (nextG.length)  { label('Next up', 'gnext');      nextG.forEach(o => dl.appendChild(row(o, '', tag(o)))); }
-  if (laterG.length) { label('Later today', 'glater'); laterG.forEach(o => dl.appendChild(row(o, 'dim', tag(o)))); }
 
-  // done folds into one line — it is rarely looked at, and never in the way
-  if (shut.length) {
-    const t = document.createElement('button');
-    t.className = 'donetoggle';
-    t.innerHTML = `<span>Done today (${shut.length})</span><span>${STATE.showDone ? '▾' : '▸'}</span>`;
-    t.onclick = () => { STATE.showDone = !STATE.showDone; render(); };
-    dl.appendChild(t);
-    if (STATE.showDone) shut.sort(byTime).forEach(o => {
-      const d = STATE.done[o.id];
-      const b = document.createElement(o.status === 'done' ? 'button' : 'div');
-      b.className = 'row2 done' + (o.status === 'done' ? ' open' : '');
-      b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
-        ${o.status === 'done'
-          ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>'
-          : '<span class="dot fail"></span>'}
-        <span class="n2">${esc(o.checks.name)}</span>
-        <span class="rm">${o.status === 'missed' ? 'missed' : d ? esc(d.signed_by) + ' · ' + hhmm(d.signed_at) : 'signed'}</span>`;
-      if (o.status === 'done') b.onclick = () => openDone(o);   // read-only, in the pop-up
-      dl.appendChild(b);
-    });
+  const card = o => {
+    const d = STATE.done[o.id];
+    const isDone = o.status === 'done' && !partDone(o);
+    const st2 = isDone ? 'done' : o.status === 'missed' ? 'missed' : partDone(o) ? 'part'
+      : u(o) === 'late' ? 'late' : ['due'].includes(u(o)) ? 'now' : 'later';
+    const e = est(o);
+    const dr = DR[o.id], got = dr ? Object.keys(dr.at || {}).length : 0;
+    const right = f && o.id === f.id ? `<span class="onscr">On screen</span>`
+      : isDone ? `<span class="rm">${d ? esc(d.signed_by) + ' · ' + hhmm(d.signed_at) : 'signed'}</span>`
+      : o.status === 'missed' ? `<span class="rm">missed</span>`
+      : partDone(o) ? `<span class="prog2">${d.done} of ${d.total}</span>`
+      : got ? `<span class="prog2">${got} of ${dr.total}</span>`
+      : st2 === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : '';
+    const b = document.createElement(o.status === 'missed' ? 'div' : 'button');
+    b.className = `tlc ${st2}` + (f && o.id === f.id ? ' sel' : '') + (o.id === worstId ? ' worst' : '');
+    // a long task is a tall block — Opening reads as the morning, a temp log as a moment
+    if (e) b.style.minHeight = Math.max(52, Math.min(170, e * 1.5)) + 'px';
+    b.innerHTML = `<span class="tln">${isDone ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>' : ''}${esc(o.checks.name)}</span>
+      ${right}
+      <span class="tlm">${e ? '~' + e + ' min' : ''}${e && e >= 20 && o.due_at
+        ? ' · from ' + hhmm(new Date(new Date(o.due_at).getTime() - e * 60000).toISOString()) : ''}</span>`;
+    if (o.status === 'missed') return b;
+    b.onclick = isDone ? () => openDone(o) : () => { STATE.focusId = o.id; render(); };
+    return b;
+  };
+
+  // things with no set time — deliveries — sit in their own box at the top
+  const anyT = mine.filter(o => !o.due_at);
+  if (anyT.length) {
+    const box = document.createElement('div');
+    box.className = 'tlany';
+    box.innerHTML = `<div class="tlanyh">Any time</div>`;
+    anyT.forEach(o => box.appendChild(card(o)));
+    dl.appendChild(box);
   }
-  if (!open.length && !part.length && !shut.length)
-    dl.insertAdjacentHTML('beforeend', `<div class="row2 done"><span class="n2">Nothing scheduled today.</span></div>`);
-  dl.scrollTop = keep;
+
+  const timed = mine.filter(o => o.due_at).map(o => ({ t: mins(o.due_at), o }));
+  const opens = STATE.opensAt ? STATE.opensAt.slice(0, 5) : null;
+  if (opens) {
+    const [h, m] = opens.split(':').map(Number);
+    const lon = new Date(now.toLocaleString('en-US', { timeZone: TZ }));
+    const t = nowM + ((h * 60 + m) - (lon.getHours() * 60 + lon.getMinutes()));
+    timed.push({ t, mark: 'doors', label: 'Doors open ' + opens });
+  }
+  timed.push({ t: nowM, mark: 'now', label: 'Now ' + hhmm(now.toISOString()) });
+  timed.sort((a, b) => a.t - b.t || (a.mark === 'now' ? 1 : b.mark === 'now' ? -1 : 0));
+
+  const rail = document.createElement('div');
+  rail.className = 'tl';
+  let last = null, nowEl = null;
+  timed.forEach(it => {
+    // the gap follows the clock, squeezed so a quiet afternoon still fits
+    if (last !== null) {
+      const gap = Math.max(6, Math.min(64, (it.t - last) * 0.5));
+      rail.insertAdjacentHTML('beforeend', `<div style="height:${gap}px"></div>`);
+    }
+    last = it.t;
+    if (it.mark) {
+      const m = document.createElement('div');
+      m.className = 'tlmark ' + it.mark;
+      m.innerHTML = `<span>${esc(it.label)}</span>`;
+      rail.appendChild(m);
+      if (it.mark === 'now') nowEl = m;
+      return;
+    }
+    const row = document.createElement('div');
+    row.className = 'tli' + (it.t < nowM ? ' past' : '');
+    row.innerHTML = `<span class="tlt">${hhmm(it.o.due_at)}</span><span class="tldot"></span>`;
+    row.appendChild(card(it.o));
+    rail.appendChild(row);
+  });
+  dl.appendChild(rail);
+  if (!mine.length) dl.insertAdjacentHTML('beforeend', `<div class="row2 done"><span class="n2">Nothing scheduled today.</span></div>`);
+
+  // keep NOW in view — unless someone has just scrolled to look at something
+  dl.onscroll = () => { if (STATE.tlAuto) STATE.tlAuto = false; else STATE.tlTouched = Date.now(); };
+  if (nowEl && Date.now() - (STATE.tlTouched || 0) > 60000) {
+    const to = Math.max(0, nowEl.offsetTop - dl.clientHeight * 0.35);
+    if (Math.abs(dl.scrollTop - to) > 2) { STATE.tlAuto = true; dl.scrollTop = to; }
+  } else dl.scrollTop = keep;
 
   // the left pane — leave it alone if it already shows the right task,
   // or if a pop-up or a corrective action is in progress

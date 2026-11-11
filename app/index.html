@@ -378,6 +378,40 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .idle p{color:#6d6a65;font-size:15px}
 .daylist .row2.sel{border:2px solid var(--charcoal);background:#fff;opacity:1 !important}
 .onscr{flex:none;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--charcoal)}
+/* the timeline */
+.tlany{border:1px dashed var(--stone);padding:10px;margin-bottom:16px;background:#fff}
+.tlanyh{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#8a8681;margin:0 0 8px 2px}
+.tlany .tlc{margin:0}
+.tl{position:relative;padding:6px 0 30px 62px}
+.tl:before{content:"";position:absolute;left:50px;top:0;bottom:0;width:2px;background:var(--stone)}
+.tli{position:relative}
+.tlt{position:absolute;left:-62px;top:15px;width:40px;text-align:right;font-size:13px;font-weight:600;
+  color:#3d3b38;font-variant-numeric:tabular-nums}
+.tldot{position:absolute;left:-17px;top:17px;width:12px;height:12px;border-radius:50%;
+  background:#fff;border:2px solid var(--charcoal)}
+.tli.past .tlt{color:#a09c96}
+.tlc{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto 1fr;align-items:start;gap:3px 10px;
+  width:100%;text-align:left;background:#fff;border:1px solid var(--mist);padding:12px 14px;
+  font-family:inherit;color:var(--charcoal);cursor:pointer}
+.tln{font-size:15px;font-weight:500;display:flex;align-items:center;gap:8px}
+.tln .tick2{width:20px;height:20px}
+.tlm{grid-column:1/-1;font-size:12px;color:#8a8681;font-variant-numeric:tabular-nums}
+.tlc.late{border:2px solid var(--fail);border-left:6px solid var(--fail)}
+.tlc.now{border:2px solid var(--clay)}
+.tlc.part{border:2px solid var(--warn)}
+.tlc.done{background:#F5F4F1;color:#8a8681}
+.tlc.missed{background:#F5F4F1;color:#8a8681;cursor:default}
+.tlc.sel{border:2px solid var(--charcoal);box-shadow:0 2px 0 var(--charcoal)}
+.tli:has(.tlc.done) .tldot{background:var(--pass);border-color:var(--pass)}
+.tli:has(.tlc.late) .tldot{border-color:var(--fail)}
+.tli:has(.tlc.sel) .tldot{background:var(--charcoal)}
+.tlmark{position:relative;height:0;margin:0 0 0 -62px}
+.tlmark:before{content:"";position:absolute;left:0;right:0;top:0;border-top:2px solid var(--clay)}
+.tlmark span{position:absolute;left:62px;top:-11px;background:var(--clay);color:#fff;font-size:11px;
+  font-weight:600;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px}
+.tlmark.doors:before{border-top:1px dashed var(--clay)}
+.tlmark.doors span{background:#fff;color:var(--clay);border:1px solid var(--clay)}
+.cols.hasLate .tlc:not(.late):not(.sel){opacity:.55}
 .donetoggle{display:flex;justify-content:space-between;width:100%;margin-top:14px;padding:14px 16px;
   background:none;border:1px solid var(--mist);font-family:inherit;font-size:13px;font-weight:600;
   letter-spacing:.06em;color:#6d6a65;cursor:pointer}
@@ -426,6 +460,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>
