@@ -40,7 +40,16 @@ let LAST_JOB = null;  // kept so the finish screen knows what was just done
 
 const $ = id => document.getElementById(id);
 const sheet = () => $('sheet');
-const panel = () => $('panel');
+// on a one-station screen the open task lives ON the board, not in a pop-up
+let INLINE_EL = null;
+const panel = () => (JOB && JOB.inline && INLINE_EL) ? INLINE_EL : $('panel');
+
+/* Is someone in the middle of something? Then the screen must not be
+   redrawn underneath them. A task open on the board is not "busy" — its
+   ticks are kept, and redrawing leaves it exactly as it was. */
+function busy() {
+  return !!document.querySelector('.ov') || !!(JOB && (!JOB.inline || JOB.hold));
+}
 
 /* ---------------------------------------------------------------- board */
 
@@ -164,11 +173,14 @@ async function load() {
   // A screen can belong to ONE station — the guides' iPad, the makers'
   // iPad. Set remotely in Devices; empty means the whole floor.
   const { data: scr } = await db.rpc('my_screen');
+  const wasSolo = STATE.solo;
   STATE.solo = null;
   if (!VIEWING && scr && scr.station_id) {
     const only = STATE.stations.find(s => s.id === scr.station_id);
     if (only) { STATE.stations = [only]; STATE.solo = only.id; }
   }
+  // switched back to the whole floor: the task open on the board goes with it
+  if (wasSolo && !STATE.solo && JOB && JOB.inline) JOB = null;
   STATE.shifts = (area.shifts || []).sort((a, b) => a.sort - b.sort);
   STATE.opensAt = site && site[0] ? site[0].opens_at : null;
 
@@ -299,7 +311,7 @@ function render() {
   if (rb) rb.style.display = STATE.testing ? '' : 'none';
 
   const cols = $('cols');
-  cols.innerHTML = '';
+  if (!STATE.solo) cols.innerHTML = '';
 
   // Worked out before the columns are drawn: a row has to be able to say
   // how late it is, and only ONE row should pulse. Six pulsing rows is the
@@ -322,7 +334,8 @@ function render() {
     pb.onclick = () => inc.length === 1 ? openCheck(inc[0]) : pickIncident(inc);
   }
 
-  STATE.stations.forEach(st => {
+  if (STATE.solo) renderSolo(now, worstId, lateAgo);
+  else STATE.stations.forEach(st => {
     const mine  = STATE.occ.filter(o => o.station_id === st.id && o.checks.kind !== 'incident');
     const open  = mine.filter(o => o.status === 'pending');
     // signed, but with lines still to do: it stays up top until finished
@@ -333,7 +346,7 @@ function render() {
 
     const nowG   = open.filter(o => ['due','late'].includes(u(o)) || !o.due_at).sort(byTime);
     const nextG  = open.filter(o => u(o) === 'next').sort(byTime);
-    const laterG = open.filter(o => u(o) === 'later').sort(byTime);
+    const laterG = open.filter(o => u(o) === 'later' && o.due_at).sort(byTime);
     const pct = mine.length ? Math.round(shut.filter(o=>o.status==='done').length / mine.length * 100) : 0;
     const partRow = o => {
       const d = STATE.done[o.id];
@@ -348,7 +361,7 @@ function render() {
     };
 
     const col = document.createElement('div');
-    col.className = 'col' + (STATE.solo ? ' solo' : '');
+    col.className = 'col';
     col.innerHTML = `<div class="chead2">
         <div class="ctop"><span class="cname2">${esc(st.name)}</span>
           <span class="ccount">${shut.filter(o=>o.status==='done').length} / ${mine.length}</span></div>
@@ -416,12 +429,8 @@ function render() {
     group('Next up', 'gnext', nextG, '');
     group('Later today', 'glater', laterG, 'dim');
 
-    // one station on the screen: done gets its own column, so finished
-    // work is always visible without pushing the to-do list down
-    const dc = STATE.solo ? document.createElement('div') : sc;
-    if (STATE.solo) dc.className = 'scroll donecol';
     if (shut.length) {
-      dc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done today<span class="ln"></span></div>`);
+      sc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done<span class="ln"></span></div>`);
       shut.sort(byTime).forEach(o => {
         const d = STATE.done[o.id];
         const b = document.createElement(o.status === 'done' ? 'button' : 'div');
@@ -435,11 +444,8 @@ function render() {
            : d ? esc(d.signed_by) + ' · ' + hhmm(d.signed_at) : 'signed'}</span>`;
         // a signed task can always be looked at again
         if (o.status === 'done') b.onclick = () => openDone(o);
-        dc.appendChild(b);
+        sc.appendChild(b);
       });
-    } else if (STATE.solo) {
-      dc.insertAdjacentHTML('beforeend', `<div class="glab2 glater">Done today<span class="ln"></span></div>
-        <div class="row2 done"><span class="n2">Nothing signed yet today.</span></div>`);
     }
     if (!open.length && !part.length) {
       sc.insertAdjacentHTML('afterbegin',
@@ -447,7 +453,6 @@ function render() {
          <div class="row2 done"><span class="n2">Nothing outstanding on this side.</span></div>`);
     }
     col.appendChild(sc);
-    if (STATE.solo) col.appendChild(dc);
     cols.appendChild(col);
   });
 
@@ -460,10 +465,128 @@ function render() {
   cols.classList.toggle('allLate', lates.length > 0 && lates.length === pending.length);
 }
 
+/* ONE station on the screen — the guides' iPad, the makers' iPad.
+   One person works one task at a time, so the screen IS that task: it is
+   open on the left, ready to tick, and the rest of the day sits on the
+   right. Signing it brings the next one up on its own. Any task on the
+   right can be tapped to bring it over instead — the kitchen can still
+   work out of order. The left pane is only rebuilt when the task on it
+   changes, so a refresh never disturbs someone mid-task. */
+function renderSolo(now, worstId, lateAgo) {
+  const cols = $('cols');
+  const st = STATE.stations[0];
+  let col = cols.querySelector('.col.solo');
+  if (!col || col.dataset.st !== st.id) {
+    cols.innerHTML = `<div class="col solo" data-st="${st.id}">
+        <div class="chead2" id="shead"></div>
+        <div class="focus"><div class="panel" id="ipanel"></div></div>
+        <div class="scroll daylist" id="daylist"></div>
+      </div>`;
+    INLINE_EL = $('ipanel');
+  }
+
+  const mine = STATE.occ.filter(o => o.station_id === st.id && o.checks.kind !== 'incident');
+  const open = mine.filter(o => o.status === 'pending');
+  const part = mine.filter(o => partDone(o));
+  const shut = mine.filter(o => o.status !== 'pending' && !partDone(o));
+  const u = o => urgency(o, now);
+  const byTime = (a, b) => ((a.due_at || '9') < (b.due_at || '9') ? -1 : 1);
+  const doneN = shut.filter(o => o.status === 'done').length;
+
+  $('shead').innerHTML = `<div class="ctop"><span class="cname2">${esc(st.name)}</span>
+      <span class="ccount">${doneN} / ${mine.length}</span></div>
+    <div class="ctrack"><i style="width:${mine.length ? Math.round(doneN / mine.length * 100) : 0}%"></i></div>`;
+
+  // what belongs on the left: the one picked, else what is due, else part-done, else the next
+  const live = o => o.status === 'pending' || partDone(o);
+  let f = mine.find(o => o.id === STATE.focusId && live(o));
+  if (!f) {
+    const dueNow = open.filter(o => o.due_at && ['due', 'late'].includes(u(o))).sort(byTime);
+    f = dueNow[0] || part.sort(byTime)[0] || open.filter(o => o.due_at).sort(byTime)[0] || null;
+    STATE.focusId = f ? f.id : null;
+  }
+
+  // the day, on the right
+  const DR = drafts();
+  const row = (o, cls, right) => {
+    const b = document.createElement('button');
+    b.className = 'row2 ' + cls + (f && o.id === f.id ? ' sel' : '')
+      + (u(o) === 'late' && o.id === worstId ? ' worst' : '');
+    b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
+      <span class="n2">${esc(o.checks.name)}</span>${right || ''}`;
+    b.onclick = () => { STATE.focusId = o.id; render(); };
+    return b;
+  };
+  const dl = $('daylist');
+  const keep = dl.scrollTop;
+  dl.innerHTML = '';
+  const label = (t, cls) => dl.insertAdjacentHTML('beforeend', `<div class="glab2 ${cls}">${t}<span class="ln"></span></div>`);
+  const nowG   = open.filter(o => ['due', 'late'].includes(u(o)) || !o.due_at).sort(byTime);
+  const nextG  = open.filter(o => u(o) === 'next').sort(byTime);
+  const laterG = open.filter(o => u(o) === 'later' && o.due_at).sort(byTime);
+  const tag = o => {
+    const d = DR[o.id], got = d ? Object.keys(d.at || {}).length : 0;
+    if (f && o.id === f.id) return `<span class="onscr">On screen</span>`;
+    if (got) return `<span class="prog2">${got} of ${d.total}</span>`;
+    return u(o) === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : '';
+  };
+  if (nowG.length || part.length) {
+    label('Now', 'gnow');
+    nowG.forEach(o => dl.appendChild(row(o, u(o) === 'late' ? 'late' : 'now', tag(o))));
+    part.sort(byTime).forEach(o => {
+      const d = STATE.done[o.id];
+      dl.appendChild(row(o, 'part', f && o.id === f.id ? tag(o) : `<span class="prog2">${d.done} of ${d.total}</span>`));
+    });
+  }
+  if (nextG.length)  { label('Next up', 'gnext');      nextG.forEach(o => dl.appendChild(row(o, '', tag(o)))); }
+  if (laterG.length) { label('Later today', 'glater'); laterG.forEach(o => dl.appendChild(row(o, 'dim', tag(o)))); }
+
+  // done folds into one line — it is rarely looked at, and never in the way
+  if (shut.length) {
+    const t = document.createElement('button');
+    t.className = 'donetoggle';
+    t.innerHTML = `<span>Done today (${shut.length})</span><span>${STATE.showDone ? '▾' : '▸'}</span>`;
+    t.onclick = () => { STATE.showDone = !STATE.showDone; render(); };
+    dl.appendChild(t);
+    if (STATE.showDone) shut.sort(byTime).forEach(o => {
+      const d = STATE.done[o.id];
+      const b = document.createElement(o.status === 'done' ? 'button' : 'div');
+      b.className = 'row2 done' + (o.status === 'done' ? ' open' : '');
+      b.innerHTML = `<span class="t2">${o.due_at ? hhmm(o.due_at) : '—'}</span>
+        ${o.status === 'done'
+          ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>'
+          : '<span class="dot fail"></span>'}
+        <span class="n2">${esc(o.checks.name)}</span>
+        <span class="rm">${o.status === 'missed' ? 'missed' : d ? esc(d.signed_by) + ' · ' + hhmm(d.signed_at) : 'signed'}</span>`;
+      if (o.status === 'done') b.onclick = () => openDone(o);   // read-only, in the pop-up
+      dl.appendChild(b);
+    });
+  }
+  if (!open.length && !part.length && !shut.length)
+    dl.insertAdjacentHTML('beforeend', `<div class="row2 done"><span class="n2">Nothing scheduled today.</span></div>`);
+  dl.scrollTop = keep;
+
+  // the left pane — leave it alone if it already shows the right task,
+  // or if a pop-up or a corrective action is in progress
+  if (JOB && (!JOB.inline || JOB.hold)) return;
+  if (!f) {
+    if (INLINE_EL.dataset.occ !== 'idle') {
+      INLINE_EL.dataset.occ = 'idle';
+      INLINE_EL.innerHTML = `<div class="idle"><h2>All done for now</h2>
+        <p>Nothing is due on ${esc(st.name)}. The next task appears here on its own.</p></div>`;
+    }
+    return;
+  }
+  const want = f.id + (partDone(f) ? ':review' : ':job');
+  if (INLINE_EL.dataset.occ === want && JOB && JOB.inline && JOB.occ.id === f.id) return;
+  INLINE_EL.dataset.occ = want;
+  partDone(f) ? openDone(f, true) : openCheck(f, true);
+}
+
 /* more than one incident form set up — ask which side it happened on */
 function pickIncident(list) {
   sheet().classList.add('open');
-  panel().innerHTML = `<div class="pickw">
+  $('panel').innerHTML = `<div class="pickw">
       <h3>Report a problem</h3>
       <p>Which side did it happen on?</p>
       ${list.map(o => {
@@ -473,7 +596,7 @@ function pickIncident(list) {
           <span class="go2">Report</span></button>`;
       }).join('')}
     </div>`;
-  panel().querySelectorAll('[data-i]').forEach(b => b.onclick = () =>
+  $('panel').querySelectorAll('[data-i]').forEach(b => b.onclick = () =>
     openCheck(list.find(o => o.id === b.dataset.i)));
 }
 
@@ -508,10 +631,10 @@ function pruneDrafts() {
   if (changed) try { localStorage.setItem(DRAFT_KEY, JSON.stringify(all)); } catch {}
 }
 
-async function openCheck(o) {
-  JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
-          tickAt: {}, alts: {} };
-  sheet().classList.add('open');
+async function openCheck(o, inline) {
+  const job = JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
+          tickAt: {}, alts: {}, inline: !!inline };
+  if (!inline) sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
 
@@ -527,6 +650,7 @@ async function openCheck(o) {
     : db.from('steps').select('id,sort,text,photo_required,guidance,guidance_image,est_minutes,alt_label')
         .eq('check_version_id', o.check_version_id).order('sort');
   const { data, error } = await q;
+  if (JOB !== job) return;   // something else was opened while this loaded
   if (error) { panel().innerHTML = `<div class="phead"><div class="ptitle">Could not load</div>
     <p class="pmeta">${esc(error.message)}</p></div>`; return; }
 
@@ -547,14 +671,15 @@ async function openCheck(o) {
 /* Opening a task that has already been signed. The record itself never
    changes — anything left undone is finished as an ADDITION, with its own
    time and its own PIN, until the end of that day. */
-async function openDone(o) {
-  JOB = { occ: o, kind: 'review', rec: null, ticked: new Set(), tickAt: {} };
-  sheet().classList.add('open');
+async function openDone(o, inline) {
+  const job = JOB = { occ: o, kind: 'review', rec: null, ticked: new Set(), tickAt: {}, inline: !!inline };
+  if (!inline) sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
   let data, error;
   try { ({ data, error } = await db.rpc('record_detail', { p_occurrence: o.id })); }
   catch (e) { error = e; }
+  if (JOB !== job) return;
   if (error || !data || !data.ok) {
     panel().innerHTML = `<div class="phead"><button class="pback">← Back</button>
       <div class="ptitle">Could not open it</div>
@@ -1020,9 +1145,9 @@ async function submit(pin) {
   const o = STATE.occ.find(x => x.id === JOB.occ.id);
   if (o) o.status = 'done';
   dropDraft(JOB.occ.id);
-  render();
+  if (!JOB.inline) render();
 
-  if (data.failures && data.failures.length) { corrective(data.failures, 0, data); return; }
+  if (data.failures && data.failures.length) { JOB.hold = true; corrective(data.failures, 0, data); return; }
   closeSheet(); celebrate(data);
 }
 
@@ -1202,7 +1327,10 @@ function celebrate(sub, hadFailure, offline) {
   </div>`;
   document.body.appendChild(ov);
   const go = ov.querySelector('#gonext');
-  if (go) go.onclick = () => { ov.remove(); openCheck(next); };
+  if (go) go.onclick = () => {
+    ov.remove();
+    if (STATE.solo) { STATE.focusId = next.id; render(); } else openCheck(next);
+  };
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
   setTimeout(() => { if (document.body.contains(ov)) ov.remove(); }, 9000);
 }
@@ -1211,10 +1339,13 @@ function markDoneLocally() {
   const o = STATE.occ.find(x => x.id === JOB.occ.id);
   if (o) o.status = 'done';
   dropDraft(JOB.occ.id);
-  render();
+  if (!JOB.inline) render();
 }
 
-function closeSheet() { LAST_JOB = JOB; sheet().classList.remove('open'); JOB = null; }
+function closeSheet() {
+  LAST_JOB = JOB; sheet().classList.remove('open'); JOB = null;
+  if (STATE.solo) render();
+}
 function toast(t) {
   let el = $('toast');
   if (!t) { el && el.remove(); return; }
@@ -1244,18 +1375,18 @@ setInterval(drawClock, 5000);
 let SEEN_DAY = todayLondon();
 
 setInterval(() => {
-  if (VIEWING && Date.now() > REVERT_AT && !JOB) return backHome();
-  if (VIEWING && !JOB) render();   // keep the countdown honest
-  if (JOB) return;                 // never yank the screen out from under someone
+  if (VIEWING && Date.now() > REVERT_AT && !busy()) return backHome();
+  if (VIEWING && !busy()) render();   // keep the countdown honest
+  if (busy()) return;                 // never yank the screen out from under someone
   if (todayLondon() !== SEEN_DAY) { SEEN_DAY = todayLondon(); load(); return; }
   render();
 }, 30000);
 
-setInterval(() => { if (!JOB) load(); }, 120000);
+setInterval(() => { if (!busy()) load(); }, 120000);
 
 db.channel('board')
   .on('postgres_changes', { event: '*', schema: 'public', table: 'occurrences' },
-      () => { if (!JOB) load(); })
+      () => { if (!busy()) load(); })
   .subscribe();
 
 load();
