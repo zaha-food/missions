@@ -403,7 +403,7 @@ let B = null;
 async function builder(checkId) {
   B = { id: checkId, kind: null, name: '', station_id: STATIONS[0]?.id, intro: '', est: '',
         items: [], sched: { pattern: 'once_daily', days: [1,2,3,4,5], window_start: '10:30',
-        window_end: '11:00', times: ['12:00'], interval_hours: 2, lead_minutes: 15 },
+        window_end: '11:00', times: ['12:00'], interval_hours: 2, lead_minutes: 30 },
         versionNo: 0, isNew: !checkId };
 
   if (checkId) {
@@ -688,7 +688,7 @@ async function publish() {
       const win = ['once_daily','certain_days'].includes(s.pattern) && s.window_start && s.window_end
         ? mins(s.window_end) - mins(s.window_start) : null;
       const sched = { check_id: checkId, pattern: s.pattern, days: s.days || [1,2,3,4,5,6,7],
-        lead_minutes: win > 0 ? win : (s.lead_minutes ?? 15), active: true,
+        lead_minutes: win > 0 ? win : (s.lead_minutes ?? 30), active: true,
         window_start: ['once_daily','every_n_hours','certain_days'].includes(s.pattern) ? s.window_start : null,
         window_end:   ['once_daily','every_n_hours','certain_days'].includes(s.pattern) ? s.window_end : null,
         times:        s.pattern === 'set_times' ? s.times : null,

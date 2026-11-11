@@ -273,6 +273,11 @@ function urgency(o, now) {
   return 'later';
 }
 
+// its window has not opened — it can be looked at, not signed
+function notYet(o) {
+  return !!o && o.status === 'pending' && !!o.appears_at && new Date(o.appears_at) > serverNow();
+}
+
 // signed off, but with lines left undone and not yet finished
 function partDone(o) {
   const d = STATE.done && STATE.done[o.id];
@@ -392,7 +397,8 @@ function render() {
         ${uu === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : ''}
         ${got ? `<span class="go2">Carry on</span>`
           : ['due','late'].includes(uu) || !o.due_at
-          ? `<span class="go2">Start</span>` : ''}`;
+          ? `<span class="go2">Start</span>`
+          : notYet(o) ? `<span class="opens">Opens ${hhmm(o.appears_at)}</span>` : ''}`;
       b.onclick = () => openCheck(o);
       return b;
     };
@@ -528,6 +534,7 @@ function renderSolo(now, worstId, lateAgo) {
     const d = STATE.done[o.id];
     const isDone = o.status === 'done' && !partDone(o);
     const st2 = isDone ? 'done' : o.status === 'missed' ? 'missed' : partDone(o) ? 'part'
+      : notYet(o) ? 'soon'
       : u(o) === 'late' ? 'late' : ['due'].includes(u(o)) ? 'now' : 'later';
     const e = est(o);
     const dr = DR[o.id], got = dr ? Object.keys(dr.at || {}).length : 0;
@@ -536,15 +543,18 @@ function renderSolo(now, worstId, lateAgo) {
       : o.status === 'missed' ? `<span class="rm">missed</span>`
       : partDone(o) ? `<span class="prog2">${d.done} of ${d.total}</span>`
       : got ? `<span class="prog2">${got} of ${dr.total}</span>`
-      : st2 === 'late' ? `<span class="lateage">${lateAgo(o)}</span>` : '';
+      : st2 === 'late' ? `<span class="lateage">${lateAgo(o)}</span>`
+      : st2 === 'soon' ? `<span class="opens">Opens ${hhmm(o.appears_at)}</span>` : '';
     const b = document.createElement(o.status === 'missed' ? 'div' : 'button');
     b.className = `tlc ${st2}` + (f && o.id === f.id ? ' sel' : '') + (o.id === worstId ? ' worst' : '');
     // a long task is a tall block — Opening reads as the morning, a temp log as a moment
     if (e) b.style.minHeight = Math.max(52, Math.min(170, e * 1.5)) + 'px';
     b.innerHTML = `<span class="tln">${isDone ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>' : ''}${esc(o.checks.name)}</span>
       ${right}
-      <span class="tlm">${e ? '~' + e + ' min' : ''}${e && e >= 20 && o.due_at
-        ? ' · from ' + hhmm(new Date(new Date(o.due_at).getTime() - e * 60000).toISOString()) : ''}</span>`;
+      <span class="tlm">${[e ? '~' + e + ' min' : '',
+        // when it can be started: its window opening, which is what the iPad enforces
+        o.appears_at && o.due_at && (new Date(o.due_at) - new Date(o.appears_at)) >= 20 * 60000
+          ? 'from ' + hhmm(o.appears_at) + ' · due ' + hhmm(o.due_at) : ''].filter(Boolean).join(' · ')}</span>`;
     if (o.status === 'missed') return b;
     b.onclick = isDone ? () => openDone(o) : () => { STATE.focusId = o.id; render(); };
     return b;
@@ -880,6 +890,21 @@ function drawJob() {
   panel().querySelectorAll('[data-count]').forEach(b => b.onclick = () => countPad(b.dataset.count));
   const s = panel().querySelector('.signbtn:not(.off)');
   if (s) s.onclick = () => askPin();
+  if (notYet(o)) lockJob(o, drawJob);
+}
+
+/* Not open yet: everything stays readable — the lines, the "?" how-to —
+   but nothing can be ticked, read or signed until the window opens. The
+   screen unlocks itself at that moment. */
+function lockJob(o, redraw) {
+  panel().querySelectorAll('[data-tick],[data-alt],[data-photo],[data-unit],[data-count]').forEach(b => {
+    b.disabled = true; b.onclick = null; b.classList.add('locked');
+  });
+  const foot = panel().querySelector('.pfoot');
+  if (foot) foot.innerHTML = `<button class="signbtn off" disabled>Opens at ${hhmm(o.appears_at)}</button>`;
+  const job = JOB;
+  const wait = Math.min(2147483000, new Date(o.appears_at) - serverNow() + 1000);
+  setTimeout(() => { if (JOB === job && !document.querySelector('.ov')) redraw(); }, wait);
 }
 
 function drawStep(x, i) {
