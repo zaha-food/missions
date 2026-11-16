@@ -904,6 +904,10 @@ function drawJob() {
   panel().querySelector('.pback').onclick = closeSheet;
   panel().querySelectorAll('[data-tick]').forEach(b => b.onclick = () => tick(b.dataset.tick));
   panel().querySelectorAll('[data-alt]').forEach(b => b.onclick = () => tickAlt(b.dataset.alt));
+  panel().querySelectorAll('[data-unalt]').forEach(b => b.onclick = () => {
+    const id = b.dataset.unalt;
+    delete JOB.alts[id]; JOB.ticked.delete(id); delete JOB.tickAt[id]; saveDraft(); drawJob();
+  });
   panel().querySelectorAll('[data-photo]').forEach(b => b.onclick = () => takePhoto(b.dataset.photo));
   panel().querySelectorAll('[data-guide]').forEach(b => b.onclick = () =>
     $('g' + b.dataset.guide).classList.toggle('open'));
@@ -938,6 +942,10 @@ function syncTempLines() {
   JOB.items.forEach(x => {
     const us = [...tempsOf(x.id), ...numsOf(x.id)];
     if (!us.length) return;
+    if (JOB.alts[x.id]) {
+      if (!us.some(u => JOB.values[u.id] !== undefined || JOB.skips[u.id])) return;
+      delete JOB.alts[x.id]; JOB.ticked.delete(x.id); changed = true;
+    }
     const all = us.every(u => JOB.values[u.id] !== undefined || JOB.skips[u.id]);
     if (all && !JOB.ticked.has(x.id)) {
       JOB.ticked.add(x.id);
@@ -976,7 +984,8 @@ function drawStep(x, i) {
         ${x.guidance ? `<p>${esc(x.guidance)}</p>` : ''}
         ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
       </div>` : ''}
-    ${reads ? `<div class="steptemps">${temps.map(drawUnit).join('')}${nums.map(drawCount).join('')}</div>` : ''}`;
+    ${reads && alt ? `<div class="steptemps"><button class="salt" data-unalt="${x.id}">Change — record a reading instead</button></div>`
+      : reads ? `<div class="steptemps">${temps.map(drawUnit).join('')}${nums.map(drawCount).join('')}</div>` : ''}`;
 }
 
 /* One row builder for temperatures and counts. Same shape as a checklist
@@ -1302,7 +1311,10 @@ function corrective(fails, i, sub) {
   const FOODS = store
     ? ['Everything in it', 'Prepped salads', 'Dairy', 'Raw meat', 'Cooked food']
     : [];
-  const ACTS = ['Binned it', 'Moved to another unit', 'Reheated', 'Called engineer'];
+  const cooling = /cooling/i.test(unit.basis || '');
+  // cooked food not below 8°C in time cannot be saved by moving or reheating it
+  const ACTS = cooling ? ['Binned it']
+    : ['Binned it', 'Moved to another unit', 'Reheated', 'Called engineer'];
 
   let food = knowsFood ? f.unit : '', qty = '', act = '', override = null;
   let foodOther = false, actOther = false;
