@@ -58,6 +58,7 @@ function route() {
   if (VIEW === 'people') return viewPeople();
   if (VIEW === 'devices') return viewDevices();
   if (VIEW === 'activity') return viewActivity();
+  if (VIEW === 'wastage') return viewWastage();
 }
 
 /* ---------------------------------------------------------------- today */
@@ -424,6 +425,10 @@ async function builder(checkId) {
         const { data: un } = await db.from('units').select('*').eq('check_version_id', B.versionId).order('sort');
         B.items.forEach(it => it.temps = (un || []).filter(u => u.step_id === it.id)
           .map(u => ({ name: u.name, limit_kind: u.limit_kind, limit_c: u.limit_c, basis: u.basis, guidance: u.guidance })));
+        // …and numbers, like the weight thrown away at closing
+        const { data: cn } = await db.from('count_items').select('*').eq('check_version_id', B.versionId).order('sort');
+        B.items.forEach(it => it.nums = (cn || []).filter(u => u.step_id === it.id)
+          .map(u => ({ name: u.name, unit_label: u.unit_label, group_name: u.group_name })));
       }
     }
   }
@@ -550,7 +555,13 @@ function itemRow(it, i) {
         <input class="finp sm" type="number" step="0.1" data-ti="${i}" data-tj="${j}" data-tf="limit_c" value="${esc(t.limit_c)}">
         <span class="deg">°C</span>
         <button class="del" data-tdel="${i}:${j}">✕</button></div>`).join('')}
+      ${(it.nums || []).map((t, j) => `<div class="irow" style="margin:6px 0 0">
+        <span class="deg">#</span>
+        <input class="finp" data-ni="${i}" data-nj="${j}" data-nf="name" value="${esc(t.name)}" placeholder="e.g. Fire grilled chicken">
+        <input class="finp sm" data-ni="${i}" data-nj="${j}" data-nf="unit_label" value="${esc(t.unit_label || '')}" placeholder="g">
+        <button class="del" data-ndel="${i}:${j}">✕</button></div>`).join('')}
       <button class="tiny" data-tadd="${i}">+ Add a temperature reading to this line</button>
+      <button class="tiny" data-nadd="${i}">+ Add a weight or number to this line</button>
       <div class="inline">
         <input class="finp sm" type="number" min="0" data-i="${i}" data-f="est_minutes" value="${esc(it.est_minutes ?? '')}" placeholder="min">
         <span class="deg">min</span>
@@ -626,6 +637,18 @@ function bindItems(p) {
     const it = B.items[+b.dataset.tadd];
     (it.temps = it.temps || []).push({ name: '', limit_kind: 'max', limit_c: 8, basis: 'Chilled storage', guidance: null });
     drawBuilder();
+  });
+  p.querySelectorAll('[data-nadd]').forEach(b => b.onclick = () => {
+    const it = B.items[+b.dataset.nadd];
+    (it.nums = it.nums || []).push({ name: '', unit_label: 'g', group_name: 'Wastage' });
+    drawBuilder();
+  });
+  p.querySelectorAll('[data-ndel]').forEach(b => b.onclick = () => {
+    const [i, j] = b.dataset.ndel.split(':').map(Number);
+    B.items[i].nums.splice(j, 1); drawBuilder();
+  });
+  p.querySelectorAll('[data-nf]').forEach(el => el.oninput = e => {
+    B.items[+e.target.dataset.ni].nums[+e.target.dataset.nj][e.target.dataset.nf] = e.target.value;
   });
   p.querySelectorAll('[data-tdel]').forEach(b => b.onclick = () => {
     const [i, j] = b.dataset.tdel.split(':').map(Number);
@@ -719,6 +742,17 @@ async function publish() {
         if (temps.length) {
           const { error: te } = await db.from('units').insert(temps);
           if (te) throw te;
+        }
+        const nums = [];
+        B.items.forEach((it, i) => (it.nums || []).filter(t => (t.name || '').trim()).forEach(t => {
+          const step = (made || []).find(m => m.sort === i + 1);
+          if (step) nums.push({ check_version_id: ver.id, step_id: step.id, sort: nums.length + 1,
+            name: t.name.trim(), unit_label: (t.unit_label || '').trim() || null,
+            group_name: t.group_name || 'Wastage', reorder_level: null });
+        }));
+        if (nums.length) {
+          const { error: ne } = await db.from('count_items').insert(nums);
+          if (ne) throw ne;
         }
       }
     }
@@ -1141,6 +1175,63 @@ const VERBS = {
   device_codes_issued:  ['New setup codes',     'note']
 };
 let ACT_FILTER = 'all';
+
+/* ============================================================ wastage */
+
+/* What was thrown away each night, and the trend. The point is the
+   pattern over weeks, not any single day — so it is a grid of days with
+   weekly totals, and a bar per item showing this week against last. */
+async function viewWastage() {
+  const m = $('main');
+  m.innerHTML = `<h1>Wastage</h1><p class="sub">Loading…</p>`;
+  const since = new Date(Date.now() - 56 * 864e5).toISOString();
+  const { data, error } = await db.from('counts')
+    .select('qty,counted_at,count_items!inner(name,group_name,unit_label,sort)')
+    .eq('count_items.group_name', 'Wastage').gte('counted_at', since)
+    .order('counted_at', { ascending: false });
+  if (error) return m.innerHTML = `<h1>Wastage</h1><div class="empty">${esc(error.message)}</div>`;
+
+  const day = iso => new Date(fixIso(iso)).toLocaleDateString('en-CA', { timeZone: TZ });
+  const items = [...new Map((data || []).map(r => [r.count_items.name, r.count_items.sort])).entries()]
+    .sort((a, b) => a[1] - b[1]).map(x => x[0]);
+  const byDay = {};
+  (data || []).forEach(r => {
+    const d = day(r.counted_at);
+    (byDay[d] = byDay[d] || {})[r.count_items.name] = ((byDay[d] || {})[r.count_items.name] || 0) + r.qty;
+  });
+  const days = Object.keys(byDay).sort().reverse();
+  const g = n => n >= 1000 ? (n / 1000).toFixed(1) + ' kg' : n + ' g';
+
+  // this week (last 7 days) against the 7 before
+  const cut1 = new Date(Date.now() - 7 * 864e5).toLocaleDateString('en-CA', { timeZone: TZ });
+  const cut2 = new Date(Date.now() - 14 * 864e5).toLocaleDateString('en-CA', { timeZone: TZ });
+  const sum = (from, to, it) => days.filter(d => d > from && d <= to).reduce((a, d) => a + (byDay[d][it] || 0), 0);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  const max = Math.max(1, ...items.flatMap(it => [sum(cut1, today, it), sum(cut2, cut1, it)]));
+
+  let html = `<h1>Wastage</h1>
+    <p class="sub">Weight thrown away at closing, recorded by the guides. Last 8 weeks.</p>`;
+  if (!days.length) {
+    m.innerHTML = html + `<div class="empty">Nothing recorded yet. It appears here after the first closing is signed.</div>`;
+    return;
+  }
+  html += `<div class="glab">Last 7 days against the 7 before <span class="ln"></span></div><div class="wbars">`;
+  items.forEach(it => {
+    const a = sum(cut1, today, it), b = sum(cut2, cut1, it);
+    html += `<div class="wbar"><span class="wname">${esc(it)}</span>
+      <span class="wtrack"><i style="width:${a / max * 100}%"></i><b style="width:${b / max * 100}%"></b></span>
+      <span class="wval">${g(a)} <small>${b ? (a > b ? '▲' : a < b ? '▼' : '=') + ' from ' + g(b) : ''}</small></span></div>`;
+  });
+  html += `</div><div class="wkey"><i></i> last 7 days <b></b> the 7 before</div>
+    <div class="glab">Each night <span class="ln"></span></div>
+    <div class="wtablewrap"><table class="wtable"><tr><th>Day</th>${items.map(it => `<th>${esc(it)}</th>`).join('')}<th>Total</th></tr>`;
+  days.forEach(d => {
+    const tot = items.reduce((a, it) => a + (byDay[d][it] || 0), 0);
+    html += `<tr><td>${new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+      ${items.map(it => `<td>${byDay[d][it] != null ? g(byDay[d][it]) : '—'}</td>`).join('')}<td><b>${g(tot)}</b></td></tr>`;
+  });
+  m.innerHTML = html + `</table></div>`;
+}
 
 async function viewActivity() {
   const m = $('main');

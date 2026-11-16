@@ -684,7 +684,7 @@ function pruneDrafts() {
 
 async function openCheck(o, inline) {
   const job = JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
-          tickAt: {}, alts: {}, readAt: {}, units: [], inline: !!inline };
+          tickAt: {}, alts: {}, readAt: {}, units: [], counts: [], inline: !!inline };
   if (!inline) sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
@@ -708,6 +708,12 @@ async function openCheck(o, inline) {
       .eq('check_version_id', o.check_version_id).order('sort');
     if (JOB !== job) return;
     JOB.units = (un || []).filter(x => x.step_id);
+    // numbers on a line — the weight thrown away at closing
+    const { data: cn } = await db.from('count_items')
+      .select('id,sort,name,reorder_level,unit_label,guidance,guidance_image,step_id')
+      .eq('check_version_id', o.check_version_id).order('sort');
+    if (JOB !== job) return;
+    JOB.counts = (cn || []).filter(x => x.step_id);
   }
   if (error) { panel().innerHTML = `<div class="phead"><div class="ptitle">Could not load</div>
     <p class="pmeta">${esc(error.message)}</p></div>`; return; }
@@ -720,7 +726,7 @@ async function openCheck(o, inline) {
       JOB.ticked.add(id); JOB.tickAt[id] = at;
       if (d.alts && d.alts[id]) JOB.alts[id] = d.alts[id];
     }
-    const uids = new Set(JOB.units.map(x => x.id));
+    const uids = new Set([...JOB.units, ...JOB.counts].map(x => x.id));
     for (const [id, v] of Object.entries(d.vals || {})) if (uids.has(id)) JOB.values[id] = v;
     for (const [id, r] of Object.entries(d.skips || {})) if (uids.has(id)) JOB.skips[id] = r;
     for (const [id, t] of Object.entries(d.readAt || {})) if (uids.has(id)) JOB.readAt[id] = t;
@@ -926,10 +932,11 @@ function lockJob(o, redraw) {
    ticked by hand: it is done when every unit has a reading, and its time
    is the time of the last reading. Clearing a reading unticks it. */
 function tempsOf(stepId) { return (JOB.units || []).filter(u => u.step_id === stepId); }
+function numsOf(stepId)  { return (JOB.counts || []).filter(u => u.step_id === stepId); }
 function syncTempLines() {
   let changed = false;
   JOB.items.forEach(x => {
-    const us = tempsOf(x.id);
+    const us = [...tempsOf(x.id), ...numsOf(x.id)];
     if (!us.length) return;
     const all = us.every(u => JOB.values[u.id] !== undefined || JOB.skips[u.id]);
     if (all && !JOB.ticked.has(x.id)) {
@@ -949,10 +956,11 @@ function drawStep(x, i) {
   const needs = x.photo_required && !shot;
   const has = x.guidance || x.guidance_image;
   const alt = JOB.alts[x.id];
-  const temps = tempsOf(x.id);
-  return `<div class="step2 ${on ? 'on' : ''} ${temps.length ? 'hastemps' : ''}">
+  const temps = tempsOf(x.id), nums = numsOf(x.id);
+  const reads = temps.length + nums.length;
+  return `<div class="step2 ${on ? 'on' : ''} ${reads ? 'hastemps' : ''}">
       <span class="snum">${i + 1}</span>
-      <button class="sbox ${on ? 'on' : ''} ${needs ? 'cam' : ''}" ${needs || temps.length ? 'disabled' : `data-tick="${x.id}"`}>
+      <button class="sbox ${on ? 'on' : ''} ${needs ? 'cam' : ''}" ${needs || reads ? 'disabled' : `data-tick="${x.id}"`}>
         ${on ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
       </button>
       <span class="stx2">${esc(x.text)}
@@ -968,7 +976,7 @@ function drawStep(x, i) {
         ${x.guidance ? `<p>${esc(x.guidance)}</p>` : ''}
         ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
       </div>` : ''}
-    ${temps.length ? `<div class="steptemps">${temps.map(drawUnit).join('')}</div>` : ''}`;
+    ${reads ? `<div class="steptemps">${temps.map(drawUnit).join('')}${nums.map(drawCount).join('')}</div>` : ''}`;
 }
 
 /* One row builder for temperatures and counts. Same shape as a checklist
@@ -1211,10 +1219,16 @@ async function submit(pin) {
       ? { step_id: x.id, done: true, photo: JOB.photos[x.id] || null,
           at: JOB.tickAt[x.id] || null, reason: JOB.alts[x.id] || null }
       : { step_id: x.id, done: false });
+    const isUnit = id => (JOB.units || []).some(u => u.id === id);
+    const isNum  = id => (JOB.counts || []).some(u => u.id === id);
     if ((JOB.units || []).length) args.p_readings = [
-      ...Object.entries(JOB.values).map(([unit_id, value]) => ({ unit_id, value, at: JOB.readAt[unit_id] || null })),
-      ...Object.entries(JOB.skips).map(([unit_id, reason]) => ({ unit_id, skipped: true, reason, at: JOB.readAt[unit_id] || null }))
+      ...Object.entries(JOB.values).filter(([id]) => isUnit(id))
+        .map(([unit_id, value]) => ({ unit_id, value, at: JOB.readAt[unit_id] || null })),
+      ...Object.entries(JOB.skips).filter(([id]) => isUnit(id))
+        .map(([unit_id, reason]) => ({ unit_id, skipped: true, reason, at: JOB.readAt[unit_id] || null }))
     ];
+    if ((JOB.counts || []).length) args.p_counts = Object.entries(JOB.values)
+      .filter(([id]) => isNum(id)).map(([item_id, qty]) => ({ item_id, qty }));
   }
   // when it ACTUALLY happened. Survives a late sync — the server keeps
   // both this and its own arrival time.
@@ -1524,15 +1538,17 @@ function drawCount(it) {
   const q = JOB.values[it.id];
   const has = q !== undefined;
   const low = has && it.reorder_level != null && q < it.reorder_level;
-  return itemRow(it, 'count', has ? (low ? 'fail' : 'pass') : '',
-    has ? q : 'tap',
+  const judged = it.reorder_level != null;
+  return itemRow(it, 'count', has ? (!judged ? 'given' : low ? 'fail' : 'pass') : '',
+    has ? q + (it.unit_label === 'g' ? ' g' : '') : 'tap',
     it.reorder_level != null
       ? 'order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
-      : (it.unit_label ? esc(it.unit_label) : ''));
+      : (it.unit_label && it.unit_label !== 'g' ? esc(it.unit_label) : ''));
 }
 
 function countPad(itemId) {
-  const it = JOB.items.find(x => x.id === itemId);
+  const it = (JOB.counts || []).find(x => x.id === itemId) || JOB.items.find(x => x.id === itemId);
+  const grams = it.unit_label === 'g';
   let buf = '';
   const ov = document.createElement('div');
   ov.className = 'ov';
@@ -1545,9 +1561,9 @@ function countPad(itemId) {
         <div class="padname">${esc(it.name)}</div>
         <div class="padlim">${it.reorder_level != null
           ? 'Re-order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
-          : 'How many on the shelf?'}</div>
-        <div class="padnum">${buf === '' ? '—' : esc(buf)}</div>
-        ${has ? `<div class="verdict ${low ? 'fail' : 'pass'}">${low ? 'Running low — add to the order' : 'Enough in stock'}</div>` : ''}
+          : grams ? 'Weight thrown away — nothing? Enter 0' : 'How many on the shelf?'}</div>
+        <div class="padnum">${buf === '' ? '—' : esc(buf)}${grams ? '<small>g</small>' : ''}</div>
+        ${has && it.reorder_level != null ? `<div class="verdict ${low ? 'fail' : 'pass'}">${low ? 'Running low — add to the order' : 'Enough in stock'}</div>` : ''}
       </div>
       <div class="keys">
         ${'123456789'.split('').map(n => `<button class="key" data-k="${n}">${n}</button>`).join('')}
@@ -1559,7 +1575,11 @@ function countPad(itemId) {
     ov.querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
       const kk = b.dataset.k;
       if (kk === 'del') buf = buf.slice(0, -1);
-      else if (kk === 'ok') { JOB.values[itemId] = parseInt(buf, 10); ov.remove(); drawJob(); return; }
+      else if (kk === 'ok') {
+        JOB.values[itemId] = parseInt(buf, 10);
+        JOB.readAt[itemId] = serverNow().toISOString();
+        saveDraft(); ov.remove(); drawJob(); return;
+      }
       else buf += kk;
       draw();
     });

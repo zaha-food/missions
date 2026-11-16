@@ -171,6 +171,20 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
   margin:24px 0 9px;display:flex;align-items:center;gap:10px}
 .daysep .ln{flex:1;height:1px;background:var(--mist)}
 .hide{display:none !important}
+.wbars{display:flex;flex-direction:column;gap:10px;margin-bottom:8px}
+.wbar{display:grid;grid-template-columns:170px 1fr 170px;gap:12px;align-items:center;font-size:14px}
+.wtrack{position:relative;height:22px;background:#fff}
+.wtrack i{position:absolute;left:0;top:0;bottom:7px;background:var(--clay)}
+.wtrack b{position:absolute;left:0;bottom:0;height:5px;background:var(--stone)}
+.wval{font-variant-numeric:tabular-nums}.wval small{color:#8a8681}
+.wkey{font-size:12px;color:#8a8681;margin:6px 0 22px;display:flex;align-items:center;gap:6px}
+.wkey i{display:inline-block;width:14px;height:10px;background:var(--clay)}
+.wkey b{display:inline-block;width:14px;height:4px;background:var(--stone);margin-left:10px}
+.wtablewrap{overflow-x:auto}
+.wtable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.wtable th{text-align:left;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#8a8681;font-weight:600;padding:0 12px 8px 0;border-bottom:1px solid var(--charcoal)}
+.wtable td{padding:9px 12px 9px 0;border-bottom:1px solid var(--mist)}
+@media (max-width:640px){.wbar{grid-template-columns:1fr;gap:4px}}
 </style>
 </head>
 <body>
@@ -199,6 +213,7 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
     <button class="nav" data-view="checks">Checks</button>
     <button class="nav" data-view="people">People</button>
     <button class="nav" data-view="devices">Devices</button>
+    <button class="nav" data-view="wastage">Wastage</button>
     <button class="nav" data-view="activity">Activity</button>
     <div class="who">Signed in as <b id="me">—</b><br><button id="out">Sign out</button></div>
   </div>
