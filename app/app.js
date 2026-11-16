@@ -1552,50 +1552,63 @@ function drawCount(it) {
   const low = has && it.reorder_level != null && q < it.reorder_level;
   const judged = it.reorder_level != null;
   return itemRow(it, 'count', has ? (!judged ? 'given' : low ? 'fail' : 'pass') : '',
-    has ? q + (it.unit_label === 'g' ? ' g' : '') : 'tap',
+    has ? halves(q) + (it.unit_label === 'g' ? ' g' : '') : 'tap',
     it.reorder_level != null
       ? 'order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
       : (it.unit_label && it.unit_label !== 'g' ? esc(it.unit_label) : ''));
 }
 
+/* 1½ rather than 1.5 — it is how a half-full box is said out loud */
+function halves(q) {
+  if (q == null || isNaN(q)) return '';
+  const w = Math.floor(q);
+  return q - w === 0.5 ? (w ? w : '') + '½' : String(q);
+}
+
 function countPad(itemId) {
   const it = (JOB.counts || []).find(x => x.id === itemId) || JOB.items.find(x => x.id === itemId);
   const grams = it.unit_label === 'g';
-  let buf = '';
+  // a container count can be half — a half-full box matters to the makers
+  const canHalf = !grams && it.reorder_level == null;
+  let buf = '', half = false;
   const ov = document.createElement('div');
   ov.className = 'ov';
   const draw = () => {
-    const q = parseInt(buf, 10);
-    const has = buf !== '' && !isNaN(q);
+    const q = (buf === '' ? 0 : parseInt(buf, 10)) + (half ? 0.5 : 0);
+    const has = buf !== '' || half;
     const low = has && it.reorder_level != null && q < it.reorder_level;
     ov.innerHTML = `<div class="pad">
       <div class="padh">
         <div class="padname">${esc(it.name)}</div>
         <div class="padlim">${it.reorder_level != null
           ? 'Re-order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
-          : grams ? 'Weight thrown away — nothing? Enter 0' : 'How many on the shelf?'}</div>
-        <div class="padnum">${buf === '' ? '—' : esc(buf)}${grams ? '<small>g</small>' : ''}</div>
+          : grams ? 'Weight thrown away — nothing? Enter 0'
+          : canHalf ? 'How many ' + esc(it.unit_label || '') + ' left? Halves are fine'
+          : 'How many on the shelf?'}</div>
+        <div class="padnum">${has ? esc(halves(q)) : '—'}${grams ? '<small>g</small>' : ''}</div>
         ${has && it.reorder_level != null ? `<div class="verdict ${low ? 'fail' : 'pass'}">${low ? 'Running low — add to the order' : 'Enough in stock'}</div>` : ''}
       </div>
       <div class="keys">
         ${'123456789'.split('').map(n => `<button class="key" data-k="${n}">${n}</button>`).join('')}
-        <button class="key" data-k="del">⌫</button>
+        ${canHalf ? `<button class="key ${half ? 'on' : ''}" data-k="half">½</button>` : `<button class="key" data-k="del">⌫</button>`}
         <button class="key" data-k="0">0</button>
         <button class="key save ${has ? '' : 'off'}" data-k="ok" ${has ? '' : 'disabled'}>Save</button>
       </div>
+      ${canHalf ? `<button class="padcancel" data-k="del">⌫ Clear</button>` : ''}
       <button class="padcancel">Cancel</button></div>`;
     ov.querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
       const kk = b.dataset.k;
-      if (kk === 'del') buf = buf.slice(0, -1);
+      if (kk === 'del') { if (canHalf) { buf = ''; half = false; } else buf = buf.slice(0, -1); }
+      else if (kk === 'half') half = !half;
       else if (kk === 'ok') {
-        JOB.values[itemId] = parseInt(buf, 10);
+        JOB.values[itemId] = q;
         JOB.readAt[itemId] = serverNow().toISOString();
         saveDraft(); ov.remove(); drawJob(); return;
       }
       else buf += kk;
       draw();
     });
-    ov.querySelector('.padcancel').onclick = () => ov.remove();
+    ov.querySelectorAll('.padcancel:not([data-k])').forEach(b => b.onclick = () => ov.remove());
   };
   draw();
   document.body.appendChild(ov);

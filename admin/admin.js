@@ -428,7 +428,7 @@ async function builder(checkId) {
         // …and numbers, like the weight thrown away at closing
         const { data: cn } = await db.from('count_items').select('*').eq('check_version_id', B.versionId).order('sort');
         B.items.forEach(it => it.nums = (cn || []).filter(u => u.step_id === it.id)
-          .map(u => ({ name: u.name, unit_label: u.unit_label, group_name: u.group_name })));
+          .map(u => ({ name: u.name, unit_label: u.unit_label, group_name: u.group_name, report: u.report })));
       }
     }
   }
@@ -558,7 +558,8 @@ function itemRow(it, i) {
       ${(it.nums || []).map((t, j) => `<div class="irow" style="margin:6px 0 0">
         <span class="deg">#</span>
         <input class="finp" data-ni="${i}" data-nj="${j}" data-nf="name" value="${esc(t.name)}" placeholder="e.g. Fire grilled chicken">
-        <input class="finp sm" data-ni="${i}" data-nj="${j}" data-nf="unit_label" value="${esc(t.unit_label || '')}" placeholder="g">
+        <input class="finp sm" data-ni="${i}" data-nj="${j}" data-nf="unit_label" value="${esc(t.unit_label || '')}" placeholder="g / pots">
+        <input class="finp sm" data-ni="${i}" data-nj="${j}" data-nf="group_name" value="${esc(t.group_name || '')}" placeholder="group">
         <button class="del" data-ndel="${i}:${j}">✕</button></div>`).join('')}
       <button class="tiny" data-tadd="${i}">+ Add a temperature reading to this line</button>
       <button class="tiny" data-nadd="${i}">+ Add a weight or number to this line</button>
@@ -640,7 +641,10 @@ function bindItems(p) {
   });
   p.querySelectorAll('[data-nadd]').forEach(b => b.onclick = () => {
     const it = B.items[+b.dataset.nadd];
-    (it.nums = it.nums || []).push({ name: '', unit_label: 'g', group_name: 'Wastage' });
+    // a new number takes its line's group and report from the ones already there
+    const sib = (it.nums || [])[0] || {};
+    (it.nums = it.nums || []).push({ name: '', unit_label: sib.unit_label || 'g',
+      group_name: sib.group_name || 'Wastage', report: sib.report || null });
     drawBuilder();
   });
   p.querySelectorAll('[data-ndel]').forEach(b => b.onclick = () => {
@@ -744,12 +748,16 @@ async function publish() {
           if (te) throw te;
         }
         const nums = [];
-        B.items.forEach((it, i) => (it.nums || []).filter(t => (t.name || '').trim()).forEach(t => {
-          const step = (made || []).find(m => m.sort === i + 1);
-          if (step) nums.push({ check_version_id: ver.id, step_id: step.id, sort: nums.length + 1,
-            name: t.name.trim(), unit_label: (t.unit_label || '').trim() || null,
-            group_name: t.group_name || 'Wastage', reorder_level: null });
-        }));
+        B.items.forEach((it, i) => {
+          // the line's report (e.g. the makers' prep list) survives every edit
+          const rpt = (it.nums || []).map(t => t.report).find(Boolean) || null;
+          (it.nums || []).filter(t => (t.name || '').trim()).forEach(t => {
+            const step = (made || []).find(m => m.sort === i + 1);
+            if (step) nums.push({ check_version_id: ver.id, step_id: step.id, sort: nums.length + 1,
+              name: t.name.trim(), unit_label: (t.unit_label || '').trim() || null,
+              group_name: (t.group_name || '').trim() || 'Wastage', report: t.report || rpt, reorder_level: null });
+          });
+        });
         if (nums.length) {
           const { error: ne } = await db.from('count_items').insert(nums);
           if (ne) throw ne;
