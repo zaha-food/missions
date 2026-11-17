@@ -55,8 +55,8 @@ document.querySelectorAll('.nav').forEach(b => b.onclick = () => {
 });
 
 function route() {
-  if (VIEW === 'today') return viewToday();
-  if (VIEW === 'records') return viewRecords();
+  if (VIEW === 'today') return viewTodayV2();
+  if (VIEW === 'records') return viewRecordsV2();
   if (VIEW === 'checks') return viewTasks();
   if (VIEW === 'people') return viewPeople();
   if (VIEW === 'devices') return viewDevices();
@@ -332,7 +332,9 @@ async function openRecord(occId) {
 $('drawer').onclick = e => { if (e.target.id === 'drawer') e.currentTarget.classList.remove('open'); };
 
 db.auth.onAuthStateChange((_e, s) => { if (!s) showLogin(); });
-boot();
+// start once every script has loaded — the pages live in tasks.js and office.js
+if (document.readyState === 'complete') boot();
+else window.addEventListener('load', boot);
 
 /* ================================================================ checks */
 
@@ -817,7 +819,7 @@ const ROLES = { staff: 'Staff — signs checks only',
                 manager: 'Manager — can manage people and checks',
                 admin: 'Admin — everything' };
 
-async function viewPeople() {
+async function viewPeopleOld() {
   const m = $('main');
   m.innerHTML = `<h1>People</h1><p class="sub">Loading…</p>`;
   if (!STATIONS.length) {
@@ -1074,7 +1076,7 @@ async function viewDevices() {
       });
     }
 
-    html += `<div class="codes">${
+    html += `<details class="devcodes"><summary>Setting up or replacing this iPad? Setup codes · ${spare.length} unused</summary><div class="codes">${
       spare.length ? spare.map(c => `<span class="code">${esc(c.code)}</span>`).join('')
                    : '<span class="rm">No codes left</span>'}
       ${used.map(c => `<span class="code used">${esc(c.code)}</span>`).join('')}</div>
@@ -1086,7 +1088,7 @@ async function viewDevices() {
         <button class="btn cta" data-issue="${d.id}">Issue 5 new codes</button>
       </div>
       <p class="sub" style="margin:10px 0 0;font-size:12px">
-        Issuing new codes cancels any unused ones, so a lost card stops working.</p>
+        Issuing new codes cancels any unused ones, so a lost card stops working.</p></details>
     </div>`;
   });
 
@@ -1266,6 +1268,7 @@ async function viewWastage() {
 
 async function viewActivity() {
   const m = $('main');
+  // shown in the menu as "Change history"
   m.innerHTML = `<h1>Activity</h1><p class="sub">Loading…</p>`;
 
   const { data, error } = await db.from('ops_activity')

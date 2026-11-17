@@ -255,6 +255,74 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
   .trow .twhenc{width:auto}
   .trow .tdays{display:none}
 }
+/* ---- menu groups ---- */
+.navg{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#a8a49e;padding:16px 18px 6px;font-weight:600}
+/* ---- the shared vertical timeline ---- */
+.arail{position:relative;padding:6px 0 30px 74px}
+.arail:before{content:"";position:absolute;left:62px;top:0;bottom:0;width:2px;background:var(--stone)}
+.aitem{position:relative}
+.atime{position:absolute;left:-74px;top:14px;width:50px;text-align:right;font-size:13px;font-weight:600;color:#3d3b38;font-variant-numeric:tabular-nums}
+.adot{position:absolute;left:-17px;top:16px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--charcoal)}
+.acard{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;width:100%;text-align:left;background:#fff;border:1px solid var(--mist);padding:12px 14px;margin:0;font-family:inherit;color:var(--charcoal);cursor:pointer}
+.acard:hover{border-color:var(--stone)}
+.atitle{flex:1;font-size:15px;font-weight:500}
+.asub{flex-basis:100%;font-size:12px;color:#8a8681}
+.amark{position:relative;height:0;margin-left:-74px}
+.amark:before{content:"";position:absolute;left:0;right:0;top:0;border-top:2px solid var(--clay)}
+.amark span{position:absolute;left:74px;top:-11px;background:var(--clay);color:#fff;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px}
+.amark.doors:before{border-top:1px dashed var(--clay)}
+.amark.doors span{background:#fff;color:var(--clay);border:1px solid var(--clay)}
+.aany{border:1px dashed var(--stone);background:#fff;padding:10px;margin-bottom:16px;display:flex;flex-direction:column;gap:6px}
+.aanyh{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#8a8681}
+.acard.st-done,.acard.st-donelate{background:#F7F9F7}
+.acard.st-late,.acard.st-missed{border:2px solid var(--fail);border-left:6px solid var(--fail)}
+.acard.st-part{border:2px solid var(--warn)}
+.acard.st-now{border:2px solid var(--clay)}
+.adot.st-done,.adot.st-donelate{background:var(--pass);border-color:var(--pass)}
+.adot.st-late,.adot.st-missed{border-color:var(--fail)}
+/* ---- today / records ---- */
+.needs{background:#fff;border:2px solid var(--fail);padding:12px 14px;margin-bottom:18px}
+.needs.calm{border:1px solid var(--mist)}
+.needsh{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--fail);margin-bottom:6px}
+.needs.calm .needsh{color:var(--pass);margin:0}
+.needrow{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;border-top:1px solid var(--mist);padding:10px 2px;font-family:inherit;font-size:14px;text-align:left;cursor:pointer}
+.tsays{font-size:14px;color:#5c5955;margin:0 0 12px}
+.tsays .bad,.bad{color:var(--fail)}
+.recbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.recbar input[type=date]{border:1px solid var(--stone);padding:9px 10px;font-family:inherit;font-size:14px}
+.itbl{width:100%;border-collapse:collapse;background:#fff;font-size:13px}
+.itbl th{text-align:left;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8a8681;padding:8px;border-bottom:1px solid var(--charcoal)}
+.itbl td{padding:7px 8px;border-bottom:1px solid var(--mist);vertical-align:top}
+.itbl tr.ifail td{background:#FBF0EF}
+.devcodes{margin-top:12px}
+.devcodes summary{cursor:pointer;font-size:13px;color:#5c5955}
+@media print{
+  .side,.noprint,.savebar,.drawer{display:none !important}
+  .main{padding:0}
+  body{background:#fff}
+}
+@media (max-width:760px){
+  .wrap{flex-direction:column}
+  .side{width:auto;height:auto;align-self:stretch;border-right:none;border-bottom:1px solid var(--mist);padding:10px 0 0;display:flex;flex-wrap:nowrap;overflow-x:auto;align-items:center;position:sticky;top:0;z-index:10}
+  .side .brand{padding:0 12px 8px}
+  .side .brand svg{width:54px}
+  .navg{display:none}
+  .nav{width:auto;white-space:nowrap;padding:10px 12px;border-left:none;border-bottom:3px solid transparent}
+  .nav.on{border-bottom-color:var(--clay)}
+  .side .who{position:static;width:auto;white-space:nowrap;padding:8px 12px;font-size:11px}
+  .main{padding:18px 16px 60px;max-width:100vw;overflow-x:hidden}
+  .row,.needrow,.acard{flex-wrap:wrap;height:auto;min-height:48px}
+  .row .rn{white-space:normal;flex-basis:60%}
+  .ttab{min-width:0;flex:1 1 40%;padding:10px 12px}
+  .ttab b{font-size:16px}
+  .tside{align-items:flex-start}
+  .itbl{display:block;overflow-x:auto}
+  .arail{padding-left:60px}
+  .arail:before{left:50px}
+  .atime{left:-60px;width:42px}
+  .amark{margin-left:-60px}
+  .amark span{left:60px}
+}
 </style>
 </head>
 <body>
@@ -278,13 +346,16 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
     <div class="brand">
       <svg viewBox="0 0 360.78 150.18" role="img" aria-label="Zaha"><path d="M0,134.94l49.37-65.4H3.26v-13.47h66.33v12.71l-45.14,60.5-4.22,5.02h50.67l.12,13.05-.26.17-70.76-.19v-12.39ZM180.72,0v147.32c5.33.41,10.77.23,16.11.12l.17-.26c-.18-13.39.05-26.75.04-40.18,0-11.53-1.76-25.98,7.92-34.44,5.81-5.07,15.17-6.24,22.56-4.71,11.48,2.39,15.33,12.41,16.06,23.07l-.02,55.86.34.75h15.66l.34-.75c-.59-18.2.74-36.85,0-54.99-.7-17.17-6.8-33.23-25.23-37.15-10.34-2.2-23.59-.69-32.07,5.98-2.27,1.78-3.95,3.88-5.77,6.08V0h-16.09ZM108.69,54.38c-17.88,2.9-29.93,15.96-33.6,33.35-3.44,16.28-1.12,37.14,10.48,49.81,16.39,17.89,49.82,16.71,64.27-3.05v12.71l.33.33h15.66l.33-.33V56.49h-16.31v12.82c-9.07-13.09-25.93-17.4-41.15-14.93ZM150.49,97.02c2.22,22.7-9.3,40.96-33.81,39.22-14.27-1.02-23.12-11.92-25.27-25.37-3.08-19.17,3.39-41.47,25.77-43.22,18.93-1.48,31.52,11.1,33.32,29.38ZM284.13,63.02c-14.49,11.87-17.68,33.5-14.62,51.1,2.83,16.26,12.3,29.54,28.59,34.23,16.61,4.78,36.01.26,46.59-13.84v12.71l.33.33h15.77V56.49h-16.09v12.82c-13.21-18.74-43.39-20.36-60.56-6.3ZM344.59,111.91c-2.64,13.25-12.2,23.33-26.11,24.33-24.04,1.72-34.11-15.78-32.95-37.71.83-15.65,9.54-29.57,26.28-30.89,26.05-2.05,37.34,21.39,32.78,44.27Z"/></svg>
     </div>
+    <div class="navg">Every day</div>
     <button class="nav on" data-view="today">Today</button>
     <button class="nav" data-view="records">Records</button>
+    <button class="nav" data-view="wastage">Wastage</button>
+    <div class="navg">Set up</div>
     <button class="nav" data-view="checks">Tasks</button>
     <button class="nav" data-view="people">People</button>
-    <button class="nav" data-view="devices">Devices</button>
-    <button class="nav" data-view="wastage">Wastage</button>
-    <button class="nav" data-view="activity">Activity</button>
+    <button class="nav" data-view="devices">iPads</button>
+    <div class="navg">History</div>
+    <button class="nav" data-view="activity">Change history</button>
     <div class="who">Signed in as <b id="me">—</b><br><button id="out">Sign out</button></div>
   </div>
   <div class="main" id="main"></div>
@@ -294,7 +365,8 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="admin.js?v=2"></script>
-<script src="tasks.js?v=2"></script>
+<script src="admin.js?v=3"></script>
+<script src="tasks.js?v=3"></script>
+<script src="office.js?v=1"></script>
 </body>
 </html>

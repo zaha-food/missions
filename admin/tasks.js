@@ -36,7 +36,8 @@ function sideWhere(stn) {
   return stn.areas ? stn.areas.name : '';
 }
 function sides() {
-  const rank = s => /^guides/i.test(s.name) ? 0 : /^makers/i.test(s.name) ? 1 : 2;
+  // Guides, then Makers upstairs, then Makers downstairs in the kitchen
+  const rank = s => /^guides/i.test(s.name) ? 0 : (s.areas && /kitchen/i.test(s.areas.name)) ? 2 : 1;
   return STATIONS.slice().sort((a, b) => rank(a) - rank(b) || a.sort - b.sort);
 }
 let TAB = null;
@@ -55,10 +56,8 @@ function daysWords(days) {
 async function viewTasks() {
   const m = $('main');
   m.innerHTML = `<h1>Tasks</h1><p class="sub">Loading…</p>`;
-  if (!STATIONS.length) {
-    const { data } = await db.from('stations').select('id,name,sort,areas(name)').order('sort');
-    STATIONS = data || [];
-  }
+  await doorsOpen();
+  await ensureStations();
   const { data: checks, error } = await db.from('checks')
     .select(`id,kind,name,est_minutes,archived_at,station_id,
              check_versions(id,version_no,status),
@@ -125,18 +124,24 @@ async function viewTasks() {
         </div>
       </div>`;
     if (!mine.length) html += `<div class="empty">No tasks for ${esc(sideName(stn))} yet. Press “+ New ${esc(sideName(stn))} task”.</div>`;
-    mine.forEach(({ c, w }) => {
-      const s = (c.schedules || [])[0];
-      const off = s && !s.active;
-      const days = s && s.pattern !== 'on_demand' && c.kind !== 'reminder' ? daysWords(s.days) : '';
-      html += `<button class="row trow" data-task="${c.id}">
-        <span class="twhenc">${esc(w.label)}</span>
-        <span class="rn">${esc(c.name)}</span>
-        <span class="rm">${esc(summary(c))}</span>
-        <span class="rm tdays">${esc(days)}</span>
-        ${off ? '<span class="chip warn">Switched off</span>' : ''}
-      </button>`;
-    });
+    else {
+      const entries = [], anyTime = [];
+      mine.forEach(({ c }) => {
+        const s = (c.schedules || [])[0];
+        const tags = [];
+        if (s && !s.active) tags.push('Switched off');
+        if (s && s.pattern !== 'on_demand' && c.kind !== 'reminder' && daysWords(s.days) !== 'Mon–Fri') tags.push(daysWords(s.days));
+        const base = { id: c.id, title: c.name, sub: summary(c), chip: tags.join(' · '), chipCls: s && !s.active ? 'warn' : 'grey' };
+        if (!s || s.pattern === 'on_demand' || c.kind === 'reminder') return anyTime.push(base);
+        if (s.pattern === 'set_times') (s.times || []).map(t5).sort().forEach(t =>
+          entries.push({ ...base, t: toMins(t), time: t }));
+        else entries.push({ ...base, t: toMins(s.window_start || s.window_end), end: toMins(s.window_end),
+          time: t5(s.window_start || s.window_end), sub: summary(c) + (s.window_end ? ' · due ' + t5(s.window_end) : '') });
+      });
+      if (anyTime.length) html += `<div class="aany"><div class="aanyh">Any time</div>${anyTime.map(e =>
+        `<button class="acard" data-task="${e.id}"><span class="atitle">${esc(e.title)}</span><span class="asub">${esc(e.sub)}</span></button>`).join('')}</div>`;
+      html += railHTML(entries, DOORS ? [{ t: toMins(DOORS), label: 'Doors open ' + DOORS, cls: 'doors' }] : [], 'data-task');
+    }
   }
   html += `<p class="sub" style="margin-top:26px"><button class="linkbtn" id="oldlist">Open the old editor</button></p>`;
   m.innerHTML = html;
