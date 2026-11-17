@@ -295,12 +295,8 @@ function render() {
   const now = serverNow();
   drawClock();
   $('datesub').textContent =
-    now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: TZ })
-    + ' · nobody signed in';
-  const sh = currentShift();
-  $('shiftname').textContent = sh
-    ? `${sh.name} shift · ${sh.starts.slice(0, 5)}–${sh.ends.slice(0, 5)}`
-    : 'Outside shift hours';
+    now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ });
+  $('shiftname').textContent = '';
 
   const away = VIEWING && VIEWING !== homeArea();
   $('areaname').textContent = STATE.area ? STATE.area.name : '—';
@@ -744,7 +740,12 @@ async function openCheck(o, inline) {
     try {
       const { data: hp } = await db.rpc('task_helpers', { p_occurrence: o.id });
       if (JOB !== job) return;
-      if (Array.isArray(hp) && hp.length) JOB.helpers = hp;
+      // the server is the truth: someone who left, or a test join, disappears
+      if (Array.isArray(hp)) {
+        JOB.helpers = hp;
+        const ok = new Set(hp.map(h => h.id));
+        for (const m of [JOB.tickBy, JOB.lineBy]) for (const k2 of Object.keys(m)) if (!ok.has(m[k2])) delete m[k2];
+      }
     } catch {}
   }
   drawJob();
@@ -815,6 +816,8 @@ function drawDone() {
       <span>${esc(c.name)}</span><b>${c.qty}${c.unit_label ? ' ' + esc(c.unit_label) : ''}</b></div>`;
 
   const n = JOB.ticked.size;
+  // keep the scroll position: entering one count must not jump to the top
+  const _pb = panel().querySelector('.pbody'), _keep = _pb ? _pb.scrollTop : 0, _for = JOB.occ.id;
   panel().innerHTML = `
     <div class="jprog">
       <button class="pback">← Back</button>
@@ -835,6 +838,9 @@ function drawDone() {
       <button class="signbtn ${n ? '' : 'off'}" ${n ? '' : 'disabled'}>
         ${n ? `Finish ${n} with your PIN` : `${missing.length} not done — tick what you've finished`}
       </button></div>` : ''}`;
+  { const pb = panel().querySelector('.pbody');
+    if (pb && panel().dataset.scrollFor === _for) pb.scrollTop = _keep;
+    panel().dataset.scrollFor = _for; }
 
   panel().querySelector('.pback').onclick = closeSheet;
   panel().querySelectorAll('[data-tick]').forEach(b => b.onclick = () => {
@@ -899,6 +905,8 @@ function drawJob() {
   const canSign = isList ? doneN > 0 || total === 0 : ready;
   const missing = total - doneN;
 
+  // keep the scroll position: entering one count must not jump to the top
+  const _pb = panel().querySelector('.pbody'), _keep = _pb ? _pb.scrollTop : 0, _for = JOB.occ.id;
   panel().innerHTML = `
     <div class="jprog">
       <button class="pback">← Back</button>
@@ -920,6 +928,9 @@ function drawJob() {
           : 'Sign off with your PIN'}
       </button>
     </div>`;
+  { const pb = panel().querySelector('.pbody');
+    if (pb && panel().dataset.scrollFor === _for) pb.scrollTop = _keep;
+    panel().dataset.scrollFor = _for; }
 
   panel().querySelector('.pback').onclick = closeSheet;
   // on the board the intro is one line; tap to read it all
