@@ -351,7 +351,7 @@ async function viewPeopleV2() {
       <span class="rm">${esc(s.job_title || '')}</span>
       ${others.length ? `<span class="rm">also ${others.map(x => esc(sideName(x) + (sideWhere(x).startsWith('Down') ? ' (kitchen)' : ''))).join(', ')}</span>` : ''}
       <span class="rm">${lastBy[s.id] ? 'last signed ' + dayTime(lastBy[s.id]) : 'never signed'}</span>
-      <span class="chip ${!s.active ? 'grey' : s.pin_hash ? 'pass' : 'warn'}">${!s.active ? 'Left' : s.pin_hash ? 'PIN active' : 'No PIN — tap to issue'}</span>
+      <span class="chip ${!s.active ? 'grey' : s.pin_hash ? 'pass' : 'warn'}">${!s.active ? 'Left' + (s.left_on ? ' ' + new Date(s.left_on + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' — tap to bring back' : '') : s.pin_hash ? 'PIN active' : 'No PIN — tap to issue'}</span>
     </button>`;
   };
 

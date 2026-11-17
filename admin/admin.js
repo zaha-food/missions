@@ -919,6 +919,7 @@ function personPanel(p0) {
       </div>
       <div class="dfoot">
         ${!isNew && P.active ? `<button class="btn" id="revoke">Mark as left</button>` : ''}
+        ${!isNew && !P.active ? `<button class="btn cta" id="rejoin">Mark as rejoined</button>` : ''}
         ${!isNew && P.active ? `<button class="btn" id="reset">${P.pin_hash ? 'Reset PIN' : 'Issue PIN'}</button>` : ''}
         <button class="btn cta" id="save">${isNew ? 'Save & issue PIN' : 'Save'}</button>
       </div>`;
@@ -943,6 +944,7 @@ function personPanel(p0) {
       await issue(P.id, draw);
     };
     if ($('revoke')) $('revoke').onclick = () => revoke(P);
+    if ($('rejoin')) $('rejoin').onclick = () => rejoin(P, draw);
     if ($('reset')) $('reset').onclick = () => issue(P.id, draw);
     $('save').onclick = () => save(P, isNew, draw);
   };
@@ -982,8 +984,21 @@ async function issue(staffId, draw) {
   draw(data);
 }
 
+/* Someone who left comes back: active again, with a NEW PIN shown once.
+   Their old PIN was never stored, so it cannot come back. */
+async function rejoin(P, draw) {
+  if (!confirm(`Welcome ${P.name} back?\n\nThey'll be active again and get a new PIN now (shown once, with a slip to print). Everything they signed before is kept.`)) return;
+  const { data, error } = await db.rpc('rejoin_staff', { p_staff: P.id });
+  if (error) return alert('Could not bring them back: ' + error.message);
+  if (!data.ok) return alert(data.error);
+  P.active = true; P.left_on = null;
+  await issue(P.id, draw);
+}
+
 async function revoke(P) {
-  if (!confirm(`Mark ${P.name} as left? Their PIN stops working immediately and is never reissued. All their past records are kept.`)) return;
+  const boss = P.role !== 'staff'
+    ? `\n\n⚠ ${P.name} is a ${P.role === 'admin' ? 'founder' : 'manager'}. While marked as left they also can't issue PINs.` : '';
+  if (!confirm(`Mark ${P.name} as left?\n\nTheir PIN stops working straight away. Everything they signed is kept.\n\nIf they come back, open them under “Left” and press “Mark as rejoined” — they’ll get a new PIN.${boss}`)) return;
   const { error } = await db.rpc('revoke_pin', { p_staff: P.id });
   if (error) return alert(error.message);
   $('drawer').classList.remove('open');
@@ -1201,7 +1216,8 @@ const VERBS = {
   reading_failed:       ['Reading failed',      'bad'],
   corrective_recorded:  ['Corrective action',   'bad'],
   pin_issued:           ['PIN issued',          'note'],
-  pin_revoked:          ['PIN revoked',         'note'],
+  pin_revoked:          ['Marked as left',      'note'],
+  staff_rejoined:       ['Rejoined',            'note'],
   device_paired:        ['Device paired',       'note'],
   device_paired_EXTRA:  ['Extra device paired', 'bad'],
   device_revoked:       ['Device unlinked',     'note'],
