@@ -711,7 +711,7 @@ async function openCheck(o, inline) {
     JOB.units = (un || []).filter(x => x.step_id);
     // numbers on a line — the weight thrown away at closing
     const { data: cn } = await db.from('count_items')
-      .select('id,sort,name,reorder_level,unit_label,guidance,guidance_image,step_id')
+      .select('id,sort,name,reorder_level,unit_label,guidance,guidance_image,step_id,group_name')
       .eq('check_version_id', o.check_version_id).order('sort');
     if (JOB !== job) return;
     JOB.counts = (cn || []).filter(x => x.step_id);
@@ -980,6 +980,23 @@ function syncTempLines() {
   if (changed) saveDraft();
 }
 
+/* A long count reads like the place it describes: "Door 3 · Shelf 2",
+   then what is on that shelf — the same order as the stickers on the
+   fridge doors. Only shown when a line has more than one place. */
+function numsWithHeadings(nums) {
+  const groups = new Set(nums.map(n => n.group_name || ''));
+  if (groups.size < 2) return nums.map(drawCount).join('');
+  let last = null, out = '';
+  nums.forEach(n => {
+    if ((n.group_name || '') !== last) {
+      last = n.group_name || '';
+      out += `<div class="numhead">${esc(last)}</div>`;
+    }
+    out += drawCount(n);
+  });
+  return out;
+}
+
 function drawStep(x, i) {
   const on = JOB.ticked.has(x.id);
   const shot = JOB.photos[x.id];
@@ -1008,7 +1025,7 @@ function drawStep(x, i) {
         ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
       </div>` : ''}
     ${reads && alt ? `<div class="steptemps"><button class="salt" data-unalt="${x.id}">Change — record a reading instead</button></div>`
-      : reads ? `<div class="steptemps">${temps.map(drawUnit).join('')}${nums.map(drawCount).join('')}</div>` : ''}`;
+      : reads ? `<div class="steptemps">${temps.map(drawUnit).join('')}${numsWithHeadings(nums)}</div>` : ''}`;
 }
 
 /* One row builder for temperatures and counts. Same shape as a checklist
