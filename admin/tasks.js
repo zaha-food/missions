@@ -26,6 +26,22 @@ const toMins = t => { const [h, m] = t5(t).split(':').map(Number); return h * 60
 const fromMins = n => String(Math.floor(((n % 1440) + 1440) % 1440 / 60)).padStart(2, '0') + ':' + String(((n % 60) + 60) % 60).padStart(2, '0');
 const clone = o => JSON.parse(JSON.stringify(o));
 
+/* The sides of the shop, Guides first — that is where the work is now.
+   "Guides — Counter" reads as Guides, upstairs in the service area. */
+function sideName(stn) { return (stn.name || '').split(' — ')[0]; }
+function sideWhere(stn) {
+  const a = (stn.areas && stn.areas.name || '').toLowerCase();
+  if (a.startsWith('service')) return 'Upstairs · service area';
+  if (a.startsWith('kitchen')) return 'Downstairs · kitchen';
+  return stn.areas ? stn.areas.name : '';
+}
+function sides() {
+  const rank = s => /^guides/i.test(s.name) ? 0 : /^makers/i.test(s.name) ? 1 : 2;
+  return STATIONS.slice().sort((a, b) => rank(a) - rank(b) || a.sort - b.sort);
+}
+let TAB = null;
+try { TAB = localStorage.getItem('tasks-tab'); } catch {}
+
 function daysWords(days) {
   const d = (days || []).slice().sort();
   if (d.join() === '1,2,3,4,5,6,7') return 'every day';
@@ -86,18 +102,29 @@ async function viewTasks() {
     return { key: toMins(s.window_start || s.window_end), label: s.window_start ? `${t5(s.window_start)}–${t5(s.window_end)}` : `by ${t5(s.window_end)}` };
   };
 
-  let html = `<h1>Tasks</h1>
-    <p class="sub">Everything the iPads show, side by side, in time order. Open a task to see it as staff do and change it.</p>
-    <div class="bar">
-      <button class="btn cta" id="newtask">+ New task</button>
-      <button class="btn" id="paper">Print paper backup</button>
-    </div>`;
+  const S = sides();
+  if (!S.some(x => x.id === TAB)) TAB = S[0]?.id;
+  const stn = S.find(x => x.id === TAB);
 
-  STATIONS.forEach(stn => {
+  let html = `<h1>Tasks</h1>
+    <p class="sub">What each iPad shows, in time order. Pick a side, then open a task to see it as staff do.</p>
+    <div class="ttabs">${S.map(x => {
+      const n = TASKS_CACHE.filter(c => c.station_id === x.id).length;
+      return `<button class="ttab ${x.id === TAB ? 'on' : ''}" data-tab="${x.id}">
+        <b>${esc(sideName(x))}</b><span>${esc(sideWhere(x))} · ${n} task${n === 1 ? '' : 's'}</span></button>`;
+    }).join('')}</div>`;
+
+  {
     const mine = TASKS_CACHE.filter(c => c.station_id === stn.id)
       .map(c => ({ c, w: when(c) })).sort((a, b) => a.w.key - b.w.key || a.c.name.localeCompare(b.c.name));
-    html += `<div class="glab">${esc(stn.name)}${stn.areas ? ' · ' + esc(stn.areas.name) : ''} <span class="ln"></span></div>`;
-    if (!mine.length) { html += `<div class="empty">No tasks on this side yet.</div>`; return; }
+    html += `<div class="tside">
+        <div><h2>${esc(sideName(stn))}</h2><p>${esc(sideWhere(stn))}</p></div>
+        <div class="bar" style="margin:0">
+          <button class="btn cta" id="newtask">+ New ${esc(sideName(stn))} task</button>
+          <button class="btn" id="paper">Print paper backup</button>
+        </div>
+      </div>`;
+    if (!mine.length) html += `<div class="empty">No tasks for ${esc(sideName(stn))} yet. Press “+ New ${esc(sideName(stn))} task”.</div>`;
     mine.forEach(({ c, w }) => {
       const s = (c.schedules || [])[0];
       const off = s && !s.active;
@@ -110,10 +137,13 @@ async function viewTasks() {
         ${off ? '<span class="chip warn">Switched off</span>' : ''}
       </button>`;
     });
-  });
+  }
   html += `<p class="sub" style="margin-top:26px"><button class="linkbtn" id="oldlist">Open the old editor</button></p>`;
   m.innerHTML = html;
-  $('newtask').onclick = newTask;
+  $('newtask').onclick = () => newTaskWizard(TAB);
+  m.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+    TAB = b.dataset.tab; try { localStorage.setItem('tasks-tab', TAB); } catch {} viewTasks();
+  });
   $('paper').onclick = () => printPaperBackup(TASKS_CACHE);
   $('oldlist').onclick = () => viewChecks();
   m.querySelectorAll('[data-task]').forEach(b => b.onclick = () => openTask(b.dataset.task));
@@ -157,6 +187,151 @@ async function openTask(id) {
 function blankSched() {
   return { pattern: 'once_daily', days: [1,2,3,4,5], window_start: '10:00', window_end: '11:00',
            times: ['12:00'], interval_hours: 2, lead_minutes: 30, alert_after: 30, active: true };
+}
+
+/* NEW TASK — one question per screen, in plain words. The side is the
+   tab you were on. It is saved at the end in one go. */
+function newTaskWizard(sideId) {
+  const W = { step: 1, name: '', station_id: sideId || sides()[0]?.id, kind: null, sched: blankSched(), items: [], more: false };
+  const dr = $('drawer'), p = $('dpanel');
+  dr.classList.add('open');
+  const stnOf = () => STATIONS.find(x => x.id === W.station_id) || {};
+  const steps = () => W.kind === 'reminder' ? [1, 2, 5] : W.kind === 'incident' ? [1, 2, 5] : [1, 2, 3, 4, 5];
+  const KIND_WORDS = {
+    checklist:   ['Tick off a list of jobs', 'e.g. Opening, Closing, a toilet check'],
+    temperature: ['Take temperatures', 'e.g. fridges, hot food, deliveries'],
+    count:       ['Count things', 'e.g. packaging, stock'],
+    incident:    ['Report a problem', 'a form for when something goes wrong'],
+    reminder:    ['A reminder on screen', 'always shown, never signed']
+  };
+
+  const draw = () => {
+    const list = steps(), at = list.indexOf(W.step) + 1;
+    let title = '', body = '';
+    if (W.step === 1) {
+      title = 'What’s the task called?';
+      body = field('Name', `<input class="finp" id="z_name" value="${esc(W.name)}" placeholder="e.g. Mid-afternoon toilet check" autofocus>`) +
+        field('Which side does it?', `<div class="opts">${sides().map(x =>
+          `<button class="opt ${x.id === W.station_id ? 'on' : ''}" data-side="${x.id}">${esc(sideName(x))} <small>· ${esc(sideWhere(x))}</small></button>`).join('')}</div>`);
+    }
+    if (W.step === 2) {
+      title = 'What do staff do?';
+      const main = ['checklist', 'temperature', 'count'], extra = ['incident', 'reminder'];
+      const card = k => `<button class="zcard ${W.kind === k ? 'on' : ''}" data-kind="${k}"><b>${KIND_WORDS[k][0]}</b><span>${KIND_WORDS[k][1]}</span></button>`;
+      body = main.map(card).join('') +
+        (W.more || extra.includes(W.kind) ? extra.map(card).join('') : `<button class="linkbtn" id="z_more">Something else…</button>`);
+    }
+    if (W.step === 3) {
+      title = 'When?';
+      const S = W.sched;
+      body = field('', `<div class="opts">
+          <button class="opt ${S.pattern === 'once_daily' ? 'on' : ''}" data-pat="once_daily">Once a day</button>
+          <button class="opt ${S.pattern === 'set_times' ? 'on' : ''}" data-pat="set_times">At set times</button>
+          <button class="opt ${S.pattern === 'on_demand' ? 'on' : ''}" data-pat="on_demand">Whenever needed</button></div>`);
+      if (S.pattern === 'once_daily') body +=
+        field('Opens', `<input class="finp sm" type="time" id="z_start" value="${t5(S.window_start)}">`, 'Staff can start it from this time.') +
+        field('Due', `<input class="finp sm" type="time" id="z_end" value="${t5(S.window_end)}">`);
+      if (S.pattern === 'set_times') body += field('Times', `${S.times.map((t, j) => `<div class="inline" style="margin-bottom:6px">
+          <input class="finp sm" type="time" data-time="${j}" value="${t5(t)}">
+          <button class="tbtn del" data-tdel="${j}" ${S.times.length < 2 ? 'disabled' : ''}>✕</button></div>`).join('')}
+          <button class="btn" id="z_addtime">+ Add a time</button>`, 'Each one opens 30 minutes before its time.');
+      if (S.pattern !== 'on_demand') body += field('Which days', `<div class="opts">${DAYS.map((d, n) =>
+          `<button class="opt ${(S.days || []).includes(n + 1) ? 'on' : ''}" data-day="${n + 1}">${d}</button>`).join('')}</div>`);
+    }
+    if (W.step === 4) {
+      title = W.kind === 'checklist' ? 'What are the jobs?' : W.kind === 'temperature' ? 'What gets a temperature?' : 'What gets counted?';
+      const rows = W.items.map((it, j) => `<div class="zitem"><span class="tnum">${j + 1}</span><span class="zname">${esc(it.text || it.name)}</span>
+          <span class="rm">${W.kind === 'checklist' ? (it.est_minutes ? it.est_minutes + ' min' : '') : W.kind === 'temperature'
+            ? (it.limit_kind === 'min' ? '≥' : '≤') + it.limit_c + '°C' : esc(it.unit_label || '')}</span>
+          <button class="tbtn del" data-idel="${j}">✕</button></div>`).join('');
+      const adder = W.kind === 'checklist'
+        ? `<input class="finp" id="z_a1" placeholder="A job, as you’d say it to a new starter"><input class="finp sm" id="z_a2" type="number" min="0" placeholder="min" style="width:80px">`
+        : W.kind === 'temperature'
+        ? `<input class="finp" id="z_a1" placeholder="e.g. Drinks fridge"><select class="finp sm" id="z_a3"><option value="max">no more than</option><option value="min">at least</option></select><input class="finp sm" id="z_a2" type="number" step="0.1" value="8" style="width:80px"><span class="deg">°C</span>`
+        : `<input class="finp" id="z_a1" placeholder="e.g. Bowls"><input class="finp sm" id="z_a2" placeholder="container" style="width:120px">`;
+      body = (rows || `<p class="fhint">Nothing yet. Type the first one below and press Enter.</p>`) +
+        `<div class="zadd">${adder}<button class="btn cta" id="z_add">Add</button></div>
+         <p class="fhint">Press Enter to add, and the next one is ready to type. You can add photos and how-to afterwards.</p>`;
+    }
+    if (W.step === 5) {
+      title = 'Check and create';
+      const S = W.sched;
+      body = `<div class="tcard"><div class="kv">
+          <span>Name</span><b>${esc(W.name)}</b>
+          <span>Side</span><b>${esc(sideName(stnOf()))} · ${esc(sideWhere(stnOf()))}</b>
+          <span>What staff do</span><b>${esc(KIND_WORDS[W.kind][0])}</b>
+          ${W.kind !== 'reminder' ? `<span>When</span><b>${esc(whenSentence(S, W.kind))}</b>` : ''}
+          ${['checklist','temperature','count'].includes(W.kind) ? `<span>${W.items.length} ${W.kind === 'checklist' ? 'job' : 'item'}${W.items.length === 1 ? '' : 's'}</span>
+            <b>${W.items.map(it => esc(it.text || it.name)).join('<br>')}</b>` : ''}
+        </div></div><p class="fhint">After it’s created you can add photos, how-to and anything else on the task page.</p>`;
+    }
+
+    p.innerHTML = `<div class="dhead"><button class="btn" id="z_cancel">← Cancel</button>
+        <p class="dmeta" style="margin-top:12px">New task · step ${at} of ${list.length}</p>
+        <div class="dtitle">${esc(title)}</div></div>
+      <div class="dbody">${body}</div>
+      <div class="dfoot zfoot">
+        ${at > 1 ? '<button class="btn" id="z_back">Back</button>' : '<span></span>'}
+        <button class="btn cta" id="z_next">${W.step === 5 ? 'Create task' : 'Next'}</button></div>`;
+
+    const g = id => p.querySelector('#' + id);
+    const collect = () => {
+      if (g('z_name')) W.name = g('z_name').value;
+      if (g('z_start')) W.sched.window_start = g('z_start').value;
+      if (g('z_end')) W.sched.window_end = g('z_end').value;
+      p.querySelectorAll('[data-time]').forEach(el => { W.sched.times[+el.dataset.time] = el.value; });
+    };
+    const addItem = () => {
+      const a = g('z_a1').value.trim(); if (!a) return g('z_a1').focus();
+      if (W.kind === 'checklist') W.items.push({ text: a, est_minutes: g('z_a2').value === '' ? null : +g('z_a2').value,
+        photo_required: false, guidance: null, guidance_image: null, alt_label: null, temps: [], nums: [] });
+      else if (W.kind === 'temperature') W.items.push({ name: a, limit_kind: g('z_a3').value, limit_c: parseFloat(g('z_a2').value),
+        basis: g('z_a3').value === 'min' ? 'Hot holding' : 'Chilled storage', guidance: null, guidance_image: null });
+      else W.items.push({ name: a, unit_label: g('z_a2').value.trim() || null, reorder_level: null, guidance: null, guidance_image: null });
+      draw(); setTimeout(() => g('z_a1') && g('z_a1').focus(), 0);
+    };
+
+    g('z_cancel').onclick = () => dr.classList.remove('open');
+    if (g('z_back')) g('z_back').onclick = () => { collect(); W.step = list[at - 2]; draw(); };
+    p.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { collect(); W.station_id = b.dataset.side; draw(); });
+    p.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => {
+      W.kind = b.dataset.kind;
+      W.sched.pattern = W.kind === 'incident' ? 'on_demand' : W.kind === 'temperature' ? 'set_times' : 'once_daily';
+      W.items = []; draw();
+    });
+    if (g('z_more')) g('z_more').onclick = () => { W.more = true; draw(); };
+    p.querySelectorAll('[data-pat]').forEach(b => b.onclick = () => { collect(); W.sched.pattern = b.dataset.pat; draw(); });
+    p.querySelectorAll('[data-day]').forEach(b => b.onclick = () => {
+      collect(); const n = +b.dataset.day, d = W.sched.days || [];
+      W.sched.days = d.includes(n) ? d.filter(x => x !== n) : [...d, n].sort(); draw();
+    });
+    if (g('z_addtime')) g('z_addtime').onclick = () => { collect(); W.sched.times.push('12:00'); draw(); };
+    p.querySelectorAll('[data-tdel]').forEach(b => b.onclick = () => { collect(); W.sched.times.splice(+b.dataset.tdel, 1); draw(); });
+    p.querySelectorAll('[data-idel]').forEach(b => b.onclick = () => { W.items.splice(+b.dataset.idel, 1); draw(); });
+    if (g('z_add')) g('z_add').onclick = addItem;
+    ['z_a1', 'z_a2'].forEach(id => { if (g(id)) g(id).onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addItem(); } }; });
+    if (g('z_name')) g('z_name').onkeydown = e => { if (e.key === 'Enter') g('z_next').click(); };
+
+    g('z_next').onclick = async () => {
+      collect();
+      if (W.step === 1 && !W.name.trim()) return alert('Give the task a name.');
+      if (W.step === 2 && !W.kind) return alert('Pick what staff do.');
+      if (W.step === 3 && W.sched.pattern !== 'on_demand') {
+        if (!(W.sched.days || []).length) return alert('Pick at least one day.');
+        if (W.sched.pattern === 'once_daily' && toMins(W.sched.window_end) <= toMins(W.sched.window_start))
+          return alert('“Due” has to be after “Opens”.');
+      }
+      if (W.step === 4 && !W.items.length) return alert('Add at least one.');
+      if (W.step < 5) { W.step = list[at]; return draw(); }
+      // create it
+      T = { id: null, kind: W.kind, name: W.name.trim(), station_id: W.station_id, intro: '', est: '',
+            versionNo: 0, versionId: null, sched: W.sched, items: W.items, dirty: true, isNew: true };
+      dr.classList.remove('open');
+      await saveTask(g('z_next'));
+    };
+    if (g('z_name')) setTimeout(() => g('z_name').focus(), 0);
+  };
+  draw();
 }
 
 function newTask() {
@@ -283,7 +458,12 @@ function drawTask() {
 
     ${hasItems ? `<div class="glab">${lineCount()} · ${T.items.length}${mins ? ' · ' + mins + ' min' : ''} <span class="ln"></span></div>
       ${lines || '<div class="empty">Nothing here yet — add the first one below.</div>'}
-      <button class="btn" id="addline" style="margin-top:6px">+ Add ${k === 'checklist' ? 'a line' : k === 'temperature' ? 'a reading' : 'an item'}</button>` : ''}
+      ${k === 'checklist' ? `<div class="zadd tquick">
+          <input class="finp" id="q_text" placeholder="Add a job — type it and press Enter">
+          <input class="finp sm" id="q_min" type="number" min="0" placeholder="min" style="width:80px">
+          <button class="btn cta" id="q_add">Add</button></div>
+        <p class="fhint">For photos, how-to or anything else, press Edit on the line. <button class="linkbtn" id="addline">More options</button></p>`
+      : `<button class="btn" id="addline" style="margin-top:6px">+ Add ${k === 'temperature' ? 'a reading' : 'an item'}</button>`}` : ''}
 
     <div class="tfoot">
       ${T.isNew ? '' : '<button class="linkbtn" id="archive">Archive this task</button> · '}
@@ -301,10 +481,20 @@ function drawTask() {
   $('editwhen').onclick = editWhen;
   $('editdetails').onclick = editDetails;
   if ($('addline')) $('addline').onclick = () => editLine(-1);
+  const quick = () => {
+    const t = $('q_text').value.trim(); if (!t) return $('q_text').focus();
+    T.items.push({ text: t, est_minutes: $('q_min').value === '' ? null : +$('q_min').value,
+      photo_required: false, guidance: null, guidance_image: null, alt_label: null, temps: [], nums: [] });
+    T.dirty = true; drawTask(); setTimeout(() => $('q_text') && $('q_text').focus(), 0);
+  };
+  if ($('q_add')) {
+    $('q_add').onclick = quick;
+    ['q_text', 'q_min'].forEach(id => $(id).onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); quick(); } });
+  }
   if ($('archive')) $('archive').onclick = archiveTask;
   if ($('oldeditor')) $('oldeditor').onclick = () => leaveTask(() => builder(T.id));
   $('discard').onclick = () => { if (confirm('Throw away your changes?')) { T.isNew ? viewTasks() : openTask(T.id); } };
-  $('savetask').onclick = saveTask;
+  $('savetask').onclick = () => saveTask();
   m.querySelectorAll('[data-up]').forEach(b => b.onclick = () => moveLine(+b.dataset.up, -1));
   m.querySelectorAll('[data-down]').forEach(b => b.onclick = () => moveLine(+b.dataset.down, 1));
   m.querySelectorAll('[data-editline]').forEach(b => b.onclick = () => editLine(+b.dataset.editline));
@@ -569,13 +759,13 @@ function editDetails() {
 
 /* --------------------------------------------------------------- save */
 
-async function saveTask() {
+async function saveTask(fromBtn) {
   const k = T.kind;
   const noItems = k === 'incident' || k === 'reminder';
   if (!T.name.trim()) { editDetails(); return; }
   if (!noItems && !T.items.length) return alert('Add at least one ' + (k === 'checklist' ? 'line' : 'item') + ' first.');
 
-  const btn = $('savetask'); btn.disabled = true; btn.textContent = 'Saving…';
+  const btn = (fromBtn && fromBtn.nodeType) ? fromBtn : $('savetask'); btn.disabled = true; btn.textContent = 'Saving…';
   try {
     let checkId = T.id;
     // a checklist's length is its lines added up
