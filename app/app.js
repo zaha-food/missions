@@ -663,8 +663,9 @@ function saveDraft() {
   if (!JOB || JOB.kind !== 'checklist') return;
   const all = drafts();
   const hasRead = Object.keys(JOB.values).length || Object.keys(JOB.skips).length;
-  if (JOB.ticked.size || hasRead) all[JOB.occ.id] = { at: JOB.tickAt, alts: JOB.alts, total: JOB.items.length,
-    vals: JOB.values, skips: JOB.skips, readAt: JOB.readAt };
+  if (JOB.ticked.size || hasRead || (JOB.helpers || []).length) all[JOB.occ.id] = { at: JOB.tickAt, alts: JOB.alts, total: JOB.items.length,
+    vals: JOB.values, skips: JOB.skips, readAt: JOB.readAt,
+    helpers: JOB.helpers, tickBy: JOB.tickBy, lineBy: JOB.lineBy };
   else delete all[JOB.occ.id];
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify(all)); } catch {}
 }
@@ -684,7 +685,7 @@ function pruneDrafts() {
 
 async function openCheck(o, inline) {
   const job = JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
-          tickAt: {}, alts: {}, readAt: {}, units: [], counts: [], inline: !!inline };
+          tickAt: {}, alts: {}, readAt: {}, units: [], counts: [], helpers: [], tickBy: {}, lineBy: {}, inline: !!inline };
   if (!inline) sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
@@ -730,6 +731,14 @@ async function openCheck(o, inline) {
     for (const [id, v] of Object.entries(d.vals || {})) if (uids.has(id)) JOB.values[id] = v;
     for (const [id, r] of Object.entries(d.skips || {})) if (uids.has(id)) JOB.skips[id] = r;
     for (const [id, t] of Object.entries(d.readAt || {})) if (uids.has(id)) JOB.readAt[id] = t;
+    JOB.helpers = d.helpers || []; JOB.tickBy = d.tickBy || {}; JOB.lineBy = d.lineBy || {};
+  }
+  if (k === 'checklist') {
+    try {
+      const { data: hp } = await db.rpc('task_helpers', { p_occurrence: o.id });
+      if (JOB !== job) return;
+      if (Array.isArray(hp) && hp.length) JOB.helpers = hp;
+    } catch {}
   }
   drawJob();
 }
@@ -771,7 +780,7 @@ function drawDone() {
     const now = JOB.ticked.has(x.step_id);
     const canTick = !was && R.can_finish && !x.photo_required && !x.has_temps;
     const note = x.done
-      ? `${x.reason ? esc(x.reason) + ' · ' : ''}${hhmm(x.done_at)}`
+      ? `${x.reason ? esc(x.reason) + ' · ' : ''}${hhmm(x.done_at)}${x.done_by ? ' · ' + esc(x.done_by) : ''}`
       : x.later_at ? `Finished later · ${hhmm(x.later_at)} by ${esc(x.later_by)}`
       : now ? `Done now · ${hhmm(JOB.tickAt[x.step_id])}`
       : x.has_temps ? 'Not done — readings can’t be added after sign-off'
@@ -890,6 +899,10 @@ function drawJob() {
         <span>${doneN} / ${total}</span></div>
       <div class="ctrack"><i style="width:${total ? Math.round(doneN/total*100) : 0}%"></i></div>
     </div>
+    ${isList ? `<div class="crew"><span class="crewl">Working on this</span>${
+        (JOB.helpers || []).map(h => `<span class="crewn">${esc(h.name)}</span>`).join('') ||
+        '<span class="crewe">More than one person? Each joins with their PIN</span>'}
+        <button class="crewj" data-join>+ Join</button></div>` : ''}
     ${o.checks.intro ? `<div class="pintro">${esc(o.checks.intro)}</div>` : ''}
     <div class="pbody">${body}</div>
     <div class="pfoot">
@@ -911,8 +924,15 @@ function drawJob() {
   panel().querySelectorAll('[data-photo]').forEach(b => b.onclick = () => takePhoto(b.dataset.photo));
   panel().querySelectorAll('[data-guide]').forEach(b => b.onclick = () =>
     $('g' + b.dataset.guide).classList.toggle('open'));
-  panel().querySelectorAll('[data-unit]').forEach(b => b.onclick = () => keypad(b.dataset.unit));
-  panel().querySelectorAll('[data-count]').forEach(b => b.onclick = () => countPad(b.dataset.count));
+  const forLine = (id, open) => {
+    const it = [...(JOB.units || []), ...(JOB.counts || [])].find(x => x.id === id);
+    if (!it || !it.step_id || JOB.lineBy[it.step_id] || (JOB.helpers || []).length < 2) return open();
+    whoDid(by => { if (by) JOB.lineBy[it.step_id] = by; saveDraft(); open(); });
+  };
+  panel().querySelectorAll('[data-unit]').forEach(b => b.onclick = () => forLine(b.dataset.unit, () => keypad(b.dataset.unit)));
+  panel().querySelectorAll('[data-count]').forEach(b => b.onclick = () => forLine(b.dataset.count, () => countPad(b.dataset.count)));
+  const jb = panel().querySelector('[data-join]');
+  if (jb) jb.onclick = joinTask;
   const s = panel().querySelector('.signbtn:not(.off)');
   if (s) s.onclick = () => askPin();
   if (notYet(o)) lockJob(o, drawJob);
@@ -949,6 +969,8 @@ function syncTempLines() {
     const all = us.every(u => JOB.values[u.id] !== undefined || JOB.skips[u.id]);
     if (all && !JOB.ticked.has(x.id)) {
       JOB.ticked.add(x.id);
+      const by = JOB.lineBy[x.id] || ((JOB.helpers || []).length === 1 ? JOB.helpers[0].id : null);
+      if (by) JOB.tickBy[x.id] = by;
       JOB.tickAt[x.id] = us.map(u => JOB.readAt[u.id]).filter(Boolean).sort().pop() || serverNow().toISOString();
       changed = true;
     } else if (!all && JOB.ticked.has(x.id)) {
@@ -972,7 +994,8 @@ function drawStep(x, i) {
         ${on ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
       </button>
       <span class="stx2">${esc(x.text)}
-        ${on && JOB.tickAt[x.id] ? `<span class="sat">${alt ? esc(alt) + ' · ' : ''}${hhmm(JOB.tickAt[x.id])}</span>`
+        ${on && JOB.tickAt[x.id] ? `<span class="sat">${alt ? esc(alt) + ' · ' : ''}${hhmm(JOB.tickAt[x.id])}${
+            JOB.tickBy[x.id] && (JOB.helpers || []).length > 1 ? ' · ' + esc(nameOf(JOB.tickBy[x.id])) : ''}</span>`
           : x.est_minutes ? `<span class="sest">${x.est_minutes} min</span>` : ''}</span>
       ${x.alt_label && !on ? `<button class="salt" data-alt="${x.id}">${esc(x.alt_label)}</button>` : ''}
       ${x.photo_required ? (shot
@@ -1017,24 +1040,62 @@ function drawUnit(u) {
     `${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C`);
 }
 
+/* WHO did each line. Everyone working the task joins once with their
+   PIN; after that a tick is one tap on a name. With nobody or one person
+   joined there is nothing to ask. */
+const nameOf = id => ((JOB.helpers || []).find(h => h.id === id) || {}).name || '';
+function whoDid(then) {
+  const hs = JOB.helpers || [];
+  if (hs.length === 0) return then(null);
+  if (hs.length === 1) return then(hs[0].id);
+  const ov = document.createElement('div');
+  ov.className = 'ov';
+  ov.innerHTML = `<div class="pad">
+      <div class="padh"><div class="padname">Who did this?</div></div>
+      <div class="reasons">${hs.map(h =>
+        `<button class="opt big" data-who="${h.id}">${esc(h.name)}</button>`).join('')}</div>
+      <button class="padcancel">Cancel</button></div>`;
+  ov.querySelectorAll('[data-who]').forEach(b => b.onclick = () => { ov.remove(); then(b.dataset.who); });
+  ov.querySelector('.padcancel').onclick = () => ov.remove();
+  document.body.appendChild(ov);
+}
+function joinTask() {
+  askPin(async pin => {
+    if (!navigator.onLine) return { error: 'Joining needs a connection' };
+    let data, error;
+    try { ({ data, error } = await db.rpc('join_task', { p_pin: pin, p_occurrence: JOB.occ.id })); }
+    catch (e) { error = e; }
+    if (error) return { error: /fetch|network|failed/i.test(error.message || '') ? 'Joining needs a connection' : error.message };
+    if (!data.ok) return { error: data.error };
+    if (!JOB.helpers.some(h => h.id === data.staff_id)) JOB.helpers.push({ id: data.staff_id, name: data.name });
+    saveDraft(); drawJob();
+    return {};
+  });
+}
+
 // the tick IS the timestamp — unticking clears it, re-ticking takes a new one
 function tick(id) {
   if (JOB.ticked.has(id)) {
-    JOB.ticked.delete(id); delete JOB.tickAt[id]; delete JOB.alts[id];
-  } else {
-    JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString();
+    JOB.ticked.delete(id); delete JOB.tickAt[id]; delete JOB.alts[id]; delete JOB.tickBy[id];
+    saveDraft(); drawJob();
+    return;
   }
-  saveDraft();
-  drawJob();
+  whoDid(by => {
+    JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString();
+    if (by) JOB.tickBy[id] = by;
+    saveDraft(); drawJob();
+  });
 }
 
 // "No delivery today" is a finished job, not a missed one
 function tickAlt(id) {
   const x = JOB.items.find(s => s.id === id);
   if (!x) return;
-  JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString(); JOB.alts[id] = x.alt_label;
-  saveDraft();
-  drawJob();
+  whoDid(by => {
+    JOB.ticked.add(id); JOB.tickAt[id] = serverNow().toISOString(); JOB.alts[id] = x.alt_label;
+    if (by) JOB.tickBy[id] = by;
+    saveDraft(); drawJob();
+  });
 }
 
 /* -------------------------------------------------------------- photos */
@@ -1069,6 +1130,7 @@ function takePhoto(stepId) {
       JOB.photos[stepId] = path;
       if (stepId !== 'incident') {
         JOB.ticked.add(stepId); JOB.tickAt[stepId] = serverNow().toISOString(); saveDraft();
+        whoDid(by => { if (by) { JOB.tickBy[stepId] = by; saveDraft(); drawJob(); } });
       }
       toast('');
       drawJob();
@@ -1229,7 +1291,9 @@ async function submit(pin) {
   } else {
     args.p_steps = JOB.items.map(x => JOB.ticked.has(x.id)
       ? { step_id: x.id, done: true, photo: JOB.photos[x.id] || null,
-          at: JOB.tickAt[x.id] || null, reason: JOB.alts[x.id] || null }
+          at: JOB.tickAt[x.id] || null, reason: JOB.alts[x.id] || null,
+          by: JOB.tickBy[x.id] || JOB.lineBy[x.id] ||
+              ((JOB.helpers || []).length === 1 ? JOB.helpers[0].id : null) }
       : { step_id: x.id, done: false });
     const isUnit = id => (JOB.units || []).some(u => u.id === id);
     const isNum  = id => (JOB.counts || []).some(u => u.id === id);

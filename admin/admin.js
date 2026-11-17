@@ -234,8 +234,13 @@ async function openRecord(occId) {
       ? 'Never completed. Recorded as missed at the end of that day.'
       : 'Not done yet.'}</div>`;
   } else {
+    // who did each line (file 57). Falls back if that column is not there yet.
+    const stepsQ = async () => {
+      const r = await db.from('record_steps').select('step_id,done,done_at,reason,steps(sort,text,photo_required),staff(name)').eq('record_id', rec.id);
+      return r.error ? db.from('record_steps').select('step_id,done,done_at,reason,steps(sort,text,photo_required)').eq('record_id', rec.id) : r;
+    };
     const [steps, reads, counts, cas, later] = await Promise.all([
-      db.from('record_steps').select('step_id,done,done_at,reason,steps(sort,text,photo_required)').eq('record_id', rec.id),
+      stepsQ(),
       db.from('readings').select('value_c,passed,skipped,skip_reason,taken_at,units(name,limit_c,limit_kind)').eq('record_id', rec.id),
       db.from('counts').select('qty,below_reorder,count_items(name,reorder_level,unit_label)').eq('record_id', rec.id),
       db.from('corrective_actions').select('*,readings(value_c,units(name,limit_c))').eq('record_id', rec.id),
@@ -250,7 +255,7 @@ async function openRecord(occId) {
       body += s.done
         ? `<div class="line"><span class="dot pass"></span>
             <span>${esc(s.steps.text)}${s.reason ? ` <small style="color:#8a8681">— ${esc(s.reason)}</small>` : ''}</span>
-            <span class="v">${hhmm(s.done_at)}</span></div>`
+            <span class="v">${hhmm(s.done_at)}${s.staff && s.staff.name ? ' · ' + esc(s.staff.name) : ''}</span></div>`
         : fin[s.step_id]
         ? `<div class="line"><span class="dot warn"></span>
             <span>${esc(s.steps.text)} <small style="color:#8a8681">— not done at sign-off,
