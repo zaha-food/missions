@@ -820,9 +820,13 @@ async function viewPeople() {
     const { data } = await db.from('stations').select('id,name,sort').order('sort');
     STATIONS = data || [];
   }
-  const { data: staff, error } = await db.from('staff')
-    .select('id,name,job_title,email,role,pin_hash,pin_set_at,active,left_on,home_station')
+  // works_stations (file 59) — falls back if that column is not there yet
+  let { data: staff, error } = await db.from('staff')
+    .select('id,name,job_title,email,role,pin_hash,pin_set_at,active,left_on,home_station,works_stations')
     .order('active', { ascending: false }).order('name');
+  if (error) ({ data: staff, error } = await db.from('staff')
+    .select('id,name,job_title,email,role,pin_hash,pin_set_at,active,left_on,home_station')
+    .order('active', { ascending: false }).order('name'));
   if (error) return m.innerHTML = `<h1>People</h1><div class="empty">${esc(error.message)}</div>`;
 
   // when did each person last sign anything?
@@ -835,12 +839,13 @@ async function viewPeople() {
   const gone = staff.filter(s => !s.active);
 
   const rowFor = s => {
-    const st = STATIONS.find(x => x.id === s.home_station);
+    const ws = (s.works_stations && s.works_stations.length ? s.works_stations : [s.home_station])
+      .map(id => (STATIONS.find(x => x.id === id) || {}).name).filter(Boolean);
     return `<button class="row ${s.active ? '' : 'okr'}" data-person="${s.id}">
       <span class="rn">${esc(s.name)}${s.role !== 'staff'
         ? ` <span class="chip grey">${s.role}</span>` : ''}</span>
       <span class="rm">${esc(s.job_title || '')}</span>
-      <span class="station">${esc(st ? st.name : '')}</span>
+      <span class="station">${esc(ws.join(' · '))}</span>
       <span class="rm">${lastBy[s.id] ? 'last signed ' + dayTime(lastBy[s.id]) : 'never signed'}</span>
       <span class="chip ${!s.active ? 'grey' : s.pin_hash ? 'pass' : 'warn'}">
         ${!s.active ? 'Left' : s.pin_hash ? 'PIN active' : 'No PIN yet'}</span>
@@ -864,6 +869,9 @@ function personPanel(p0) {
   const isNew = !p0;
   let P = p0 ? { ...p0 } : { name: '', job_title: '', role: 'staff',
                              home_station: STATIONS[0]?.id, email: '' };
+  // one or several stations — a maker who also does guide shifts
+  P.works_stations = (P.works_stations && P.works_stations.length) ? [...P.works_stations]
+    : (P.home_station ? [P.home_station] : []);
   dr.classList.add('open');
 
   const draw = (pin) => {
@@ -890,9 +898,10 @@ function personPanel(p0) {
           <input class="finp" id="pname" value="${esc(P.name)}" placeholder="e.g. Rosa M."></div>
         <div class="ask"><span class="asklab">Job title</span>
           <input class="finp" id="pjob" value="${esc(P.job_title || '')}" placeholder="e.g. Kitchen porter"></div>
-        <div class="ask"><span class="asklab">Usually works</span>
-          <select class="finp" id="pstation">${STATIONS.map(s =>
-            `<option value="${s.id}" ${s.id === P.home_station ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
+        <div class="ask"><span class="asklab">Usually works — tick all that apply</span>
+          <div class="opts">${STATIONS.map(s =>
+            `<button class="opt ${P.works_stations.includes(s.id) ? 'on' : ''}" data-ws="${s.id}">${
+              P.works_stations.includes(s.id) ? '✓ ' : ''}${esc(s.name)}</button>`).join('')}</div></div>
         <div class="ask"><span class="asklab">Permission level</span>
           <select class="finp" id="prole">${Object.entries(ROLES).map(([v, l]) =>
             `<option value="${v}" ${v === P.role ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -911,7 +920,12 @@ function personPanel(p0) {
     $('close').onclick = () => { dr.classList.remove('open'); viewPeople(); };
     $('pname').oninput = e => P.name = e.target.value;
     $('pjob').oninput = e => P.job_title = e.target.value;
-    $('pstation').onchange = e => P.home_station = e.target.value;
+    p.querySelectorAll('[data-ws]').forEach(b => b.onclick = () => {
+      const id = b.dataset.ws;
+      P.works_stations = P.works_stations.includes(id)
+        ? P.works_stations.filter(x => x !== id) : [...P.works_stations, id];
+      draw(pin);
+    });
     $('prole').onchange = e => { P.role = e.target.value;
       $('emailwrap').style.display = P.role === 'staff' ? 'none' : ''; };
     if ($('pemail')) $('pemail').oninput = e => P.email = e.target.value;
@@ -937,7 +951,7 @@ async function save(P, isNew, draw) {
   try {
     const { data: site } = await db.from('sites').select('id').limit(1).single();
     const row = { site_id: site.id, name: P.name.trim(), job_title: P.job_title || null,
-                  home_station: P.home_station, role: P.role,
+                  home_station: P.works_stations[0] || null, works_stations: P.works_stations, role: P.role,
                   email: P.role === 'staff' ? null : (P.email || '').trim().toLowerCase() || null };
     if (isNew) {
       const { data, error } = await db.from('staff').insert(row).select('id').single();
