@@ -46,6 +46,9 @@ $('pw').onkeydown = e => { if (e.key === 'Enter') $('signin').click(); };
 $('out').onclick = async () => { await db.auth.signOut(); showLogin(); };
 
 document.querySelectorAll('.nav').forEach(b => b.onclick = () => {
+  // never lose unsaved task edits by clicking another section
+  if (typeof T !== 'undefined' && T && T.dirty && !confirm('You have unsaved changes. Leave without saving?')) return;
+  if (typeof T !== 'undefined') T = null;
   VIEW = b.dataset.view;
   document.querySelectorAll('.nav').forEach(n => n.classList.toggle('on', n === b));
   route();
@@ -54,7 +57,7 @@ document.querySelectorAll('.nav').forEach(b => b.onclick = () => {
 function route() {
   if (VIEW === 'today') return viewToday();
   if (VIEW === 'records') return viewRecords();
-  if (VIEW === 'checks') return viewChecks();
+  if (VIEW === 'checks') return viewTasks();
   if (VIEW === 'people') return viewPeople();
   if (VIEW === 'devices') return viewDevices();
   if (VIEW === 'activity') return viewActivity();
@@ -777,7 +780,8 @@ async function publish() {
       const win = ['once_daily','certain_days'].includes(s.pattern) && s.window_start && s.window_end
         ? mins(s.window_end) - mins(s.window_start) : null;
       const sched = { check_id: checkId, pattern: s.pattern, days: s.days || [1,2,3,4,5,6,7],
-        lead_minutes: win > 0 ? win : (s.lead_minutes ?? 30), active: true,
+        lead_minutes: win > 0 ? win : (s.lead_minutes ?? 30), active: s.active !== false,
+        alert_after: s.alert_after ?? 30,
         window_start: ['once_daily','every_n_hours','certain_days'].includes(s.pattern) ? s.window_start : null,
         window_end:   ['once_daily','every_n_hours','certain_days'].includes(s.pattern) ? s.window_end : null,
         times:        s.pattern === 'set_times' ? s.times : null,
