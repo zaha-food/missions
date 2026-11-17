@@ -1104,6 +1104,9 @@ function shrink(file, max = 1200, q = 0.7) {
 
 function keypad(unitId) {
   const u = (JOB.units || []).find(x => x.id === unitId) || JOB.items.find(x => x.id === unitId);
+  // a fridge has no "out of stock" — it is either reading, or switched off
+  // (the salad fridge, emptied every Friday night for the weekend)
+  const fridge = /chilled storage|frozen storage/i.test(u.basis || '');
   let buf = '';
   const ov = document.createElement('div');
   ov.className = 'ov';
@@ -1126,7 +1129,7 @@ function keypad(unitId) {
         <button class="key wide" data-k="del">⌫</button>
         <button class="key save ${has ? '' : 'off'}" data-k="ok" ${has ? '' : 'disabled'}>Save</button>
       </div>
-      <button class="padna">Not out today</button>
+      <button class="padna">${fridge ? 'Switched off' : 'Not out today'}</button>
       <button class="padcancel">Cancel</button>
     </div>`;
     ov.querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
@@ -1147,10 +1150,10 @@ function keypad(unitId) {
       ov.innerHTML = `<div class="pad">
         <div class="padh">
           <div class="padname">${esc(u.name)}</div>
-          <div class="padlim">Why is there nothing to measure?</div>
+          <div class="padlim">${fridge ? 'Why is there no reading?' : 'Why is there nothing to measure?'}</div>
         </div>
         <div class="reasons">
-          ${['Out of stock','Not made yet']
+          ${(fridge ? ['Switched off for the weekend'] : ['Out of stock','Not made yet'])
             .map(r => `<button class="opt big" data-r="${esc(r)}">${esc(r)}</button>`).join('')}
         </div>
         <button class="padcancel">Back</button></div>`;
