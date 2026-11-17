@@ -277,6 +277,11 @@ function urgency(o, now) {
 function notYet(o) {
   return !!o && o.status === 'pending' && !!o.appears_at && new Date(o.appears_at) > serverNow();
 }
+// …and actually locked: never while testing (no go-live date), so a 20:00
+// task can be tried at 15:00. Setting go-live brings the lock back.
+function locked(o) { return notYet(o) && !STATE.testing; }
+const opensTag = o => locked(o) ? `Opens ${hhmm(o.appears_at)}`
+  : notYet(o) ? `Opens ${hhmm(o.appears_at)} · unlocked for testing` : '';
 
 // signed off, but with lines left undone and not yet finished
 function partDone(o) {
@@ -321,6 +326,8 @@ function render() {
 
   const rb = $('resetbtn');
   if (rb) rb.style.display = STATE.testing ? '' : 'none';
+  const tb = $('testbtn');
+  if (tb) tb.style.display = STATE.testing ? '' : 'none';
 
   const cols = $('cols');
   if (!STATE.solo) cols.innerHTML = '';
@@ -398,7 +405,7 @@ function render() {
         ${got ? `<span class="go2">Carry on</span>`
           : ['due','late'].includes(uu) || !o.due_at
           ? `<span class="go2">Start</span>`
-          : notYet(o) ? `<span class="opens">Opens ${hhmm(o.appears_at)}</span>` : ''}`;
+          : notYet(o) ? `<span class="opens">${opensTag(o)}</span>` : ''}`;
       b.onclick = () => openCheck(o);
       return b;
     };
@@ -534,7 +541,7 @@ function renderSolo(now, worstId, lateAgo) {
     const d = STATE.done[o.id];
     const isDone = o.status === 'done' && !partDone(o);
     const st2 = isDone ? 'done' : o.status === 'missed' ? 'missed' : partDone(o) ? 'part'
-      : notYet(o) ? 'soon'
+      : locked(o) ? 'soon'
       : u(o) === 'late' ? 'late' : ['due'].includes(u(o)) ? 'now' : 'later';
     const e = est(o);
     const dr = DR[o.id], got = dr ? Object.keys(dr.at || {}).length : 0;
@@ -544,7 +551,7 @@ function renderSolo(now, worstId, lateAgo) {
       : partDone(o) ? `<span class="prog2">${d.done} of ${d.total}</span>`
       : got ? `<span class="prog2">${got} of ${dr.total}</span>`
       : st2 === 'late' ? `<span class="lateage">${lateAgo(o)}</span>`
-      : st2 === 'soon' ? `<span class="opens">Opens ${hhmm(o.appears_at)}</span>` : '';
+      : notYet(o) ? `<span class="opens">${opensTag(o)}</span>` : '';
     const b = document.createElement(o.status === 'missed' ? 'div' : 'button');
     b.className = `tlc ${st2}` + (f && o.id === f.id ? ' sel' : '') + (o.id === worstId ? ' worst' : '');
     // a long task is a tall block — Opening reads as the morning, a temp log as a moment
@@ -935,7 +942,7 @@ function drawJob() {
   if (jb) jb.onclick = joinTask;
   const s = panel().querySelector('.signbtn:not(.off)');
   if (s) s.onclick = () => askPin();
-  if (notYet(o)) lockJob(o, drawJob);
+  if (locked(o)) lockJob(o, drawJob);
 }
 
 /* Not open yet: everything stays readable — the lines, the "?" how-to —
@@ -1614,6 +1621,36 @@ load();
 
 
 /* ---- testing only ---- */
+/* Testing only: put any task on today's board now — the Monday safety
+   check on a Tuesday, Closing at 3pm. Gone once the site has a go-live date. */
+const testBtn = $('testbtn');
+if (testBtn) testBtn.onclick = async () => {
+  const { data: list } = await db.from('checks').select('id,name,kind,station_id')
+    .in('station_id', STATE.stations.map(s => s.id)).is('archived_at', null)
+    .not('kind', 'in', '(reminder,incident)').order('name');
+  const ov = document.createElement('div');
+  ov.className = 'ov';
+  ov.innerHTML = `<div class="pad">
+      <div class="padh"><div class="padname">Test a task</div>
+        <div class="padlim">It goes on today's board now, open and due in an hour.</div></div>
+      <div class="reasons" style="max-height:52vh;overflow-y:auto">${(list || []).map(c =>
+        `<button class="opt big" data-tc="${c.id}">${esc(c.name)}</button>`).join('') || '<p>No tasks found.</p>'}</div>
+      <button class="padcancel">Cancel</button></div>`;
+  ov.querySelectorAll('[data-tc]').forEach(b => b.onclick = async () => {
+    ov.remove();
+    toast('Adding…');
+    const { data, error } = await db.rpc('test_add_task', { p_check: b.dataset.tc });
+    toast('');
+    if (error) return alert(error.message);
+    if (!data.ok) return alert(data.error);
+    await load();
+    toast(data.name + ' is on the board');
+    setTimeout(() => toast(''), 2500);
+  });
+  ov.querySelector('.padcancel').onclick = () => ov.remove();
+  document.body.appendChild(ov);
+};
+
 const resetBtn = $('resetbtn');
 if (resetBtn) resetBtn.onclick = async () => {
   if (!confirm('Put today\'s missions back to the start and delete today\'s test records?')) return;
