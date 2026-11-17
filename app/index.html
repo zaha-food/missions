@@ -386,6 +386,37 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .unitrow.given .uval{color:var(--charcoal)}
 /* the ½ key, when it is on */
 .key.on{background:var(--charcoal);color:#fff}
+/* the task open on a one-station board: compact, so 6–7 lines show at
+   once — the header, the crew and the intro shrink; rows stay finger-sized */
+.col.solo .chead2{margin-bottom:8px}
+.col.solo .cname2{font-size:15px}
+.col.solo .ctrack{height:6px;margin-top:5px}
+.focus .jprog{padding:8px 16px}
+.focus .jtop{margin-bottom:5px;align-items:center}
+.focus .jtop b{font-size:18px}
+.focus .jtop span{font-size:14px}
+.focus .ctrack{height:6px;margin-top:0}
+.focus .crew{padding:5px 16px;gap:6px}
+.focus .crewl{font-size:10px}
+.focus .crewn{padding:3px 9px;font-size:13px}
+.focus .crewe{font-size:12px}
+.focus .crewj{min-height:34px;padding:5px 12px;font-size:13px}
+.focus .pintro{margin:8px 14px 0;padding:6px 10px;font-size:13px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;cursor:pointer;border-left-width:2px}
+.focus .pintro.open{white-space:normal}
+.focus .pbody{padding:8px 14px 12px}
+.focus .step2{min-height:56px;gap:11px;padding:0 12px;margin-bottom:5px}
+.focus .snum{width:16px;font-size:12px}
+.focus .sbox{width:38px;height:38px}
+.focus .stx2{font-size:15.5px;line-height:1.3}
+.focus .sest,.focus .sat{font-size:12px;margin-top:1px}
+.focus .pqs{width:38px;height:38px;font-size:15px}
+.focus .salt{min-height:38px;font-size:13px;padding:0 10px}
+.focus .steptemps{padding:2px 12px 8px 54px;margin-bottom:5px}
+.focus .unitrow{min-height:52px;margin:5px 0 0}
+.focus .uname{font-size:15px}
+.focus .pfoot{padding:8px 14px}
+.focus .signbtn{height:48px;font-size:16px}
 /* fridge-layout headings inside a count line */
 .numhead{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--charcoal);margin:16px 0 2px}
 .numhead:first-child{margin-top:8px}
@@ -483,6 +514,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>

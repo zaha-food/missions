@@ -922,6 +922,9 @@ function drawJob() {
     </div>`;
 
   panel().querySelector('.pback').onclick = closeSheet;
+  // on the board the intro is one line; tap to read it all
+  const pin = panel().querySelector('.pintro');
+  if (pin) pin.onclick = () => pin.classList.toggle('open');
   panel().querySelectorAll('[data-tick]').forEach(b => b.onclick = () => tick(b.dataset.tick));
   panel().querySelectorAll('[data-alt]').forEach(b => b.onclick = () => tickAlt(b.dataset.alt));
   panel().querySelectorAll('[data-unalt]').forEach(b => b.onclick = () => {
