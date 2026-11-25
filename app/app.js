@@ -1708,7 +1708,9 @@ function countPad(itemId) {
   const it = (JOB.counts || []).find(x => x.id === itemId) || JOB.items.find(x => x.id === itemId);
   const grams = it.unit_label === 'g';
   // a container count can be half — a half-full box matters to the makers
-  const canHalf = !grams && it.reorder_level == null;
+  // wastage is whole pieces (kofte, falafel) or grams — never halves
+  const waste = it.group_name === 'Wastage';
+  const canHalf = !grams && !waste && it.reorder_level == null;
   let buf = '', half = false;
   const ov = document.createElement('div');
   ov.className = 'ov';
@@ -1722,6 +1724,7 @@ function countPad(itemId) {
         <div class="padlim">${it.reorder_level != null
           ? 'Re-order below ' + it.reorder_level + (it.unit_label ? ' ' + esc(it.unit_label) : '')
           : grams ? 'Weight thrown away — nothing? Enter 0'
+          : waste ? 'How many thrown away — nothing? Enter 0'
           : canHalf ? 'How many ' + esc(it.unit_label || '') + ' left? Halves are fine'
           : 'How many on the shelf?'}</div>
         <div class="padnum">${has ? esc(halves(q)) : '—'}${grams ? '<small>g</small>' : ''}</div>

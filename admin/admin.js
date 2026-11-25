@@ -1241,43 +1241,57 @@ async function viewWastage() {
   if (error) return m.innerHTML = `<h1>Wastage</h1><div class="empty">${esc(error.message)}</div>`;
 
   const day = iso => new Date(fixIso(iso)).toLocaleDateString('en-CA', { timeZone: TZ });
-  const items = [...new Map((data || []).map(r => [r.count_items.name, r.count_items.sort])).entries()]
-    .sort((a, b) => a[1] - b[1]).map(x => x[0]);
+  // each item keeps its own unit: kofte and falafel are counted (pieces),
+  // sweet potato and chicken weighed (grams). Keyed by name AND unit, so an
+  // item that changed unit never mixes the two in one figure.
+  const keyOf = r => r.count_items.name + '|' + (r.count_items.unit_label || '');
+  const meta = new Map();
+  (data || []).forEach(r => { if (!meta.has(keyOf(r))) meta.set(keyOf(r), { name: r.count_items.name, unit: r.count_items.unit_label || '', sort: r.count_items.sort }); });
+  const items = [...meta.entries()].sort((a, b) => a[1].sort - b[1].sort).map(x => x[0]);
+  const nameCount = {}; items.forEach(k => { const n = meta.get(k).name; nameCount[n] = (nameCount[n] || 0) + 1; });
+  const label = k => { const m2 = meta.get(k); return m2.name + (nameCount[m2.name] > 1 ? ` (${m2.unit === 'g' ? 'weighed' : 'counted'})` : ''); };
   const byDay = {};
   (data || []).forEach(r => {
-    const d = day(r.counted_at);
-    (byDay[d] = byDay[d] || {})[r.count_items.name] = ((byDay[d] || {})[r.count_items.name] || 0) + r.qty;
+    const d = day(r.counted_at), k = keyOf(r);
+    (byDay[d] = byDay[d] || {})[k] = ((byDay[d] || {})[k] || 0) + Number(r.qty);
   });
   const days = Object.keys(byDay).sort().reverse();
+  const isG = k => meta.get(k).unit === 'g';
   const g = n => n >= 1000 ? (n / 1000).toFixed(1) + ' kg' : n + ' g';
+  const fmt = (k, n) => isG(k) ? g(n) : n + ' ' + (n === 1 ? (meta.get(k).unit || 'piece').replace(/s$/, '') : (meta.get(k).unit || 'pieces'));
 
   // this week (last 7 days) against the 7 before
   const cut1 = new Date(Date.now() - 7 * 864e5).toLocaleDateString('en-CA', { timeZone: TZ });
   const cut2 = new Date(Date.now() - 14 * 864e5).toLocaleDateString('en-CA', { timeZone: TZ });
   const sum = (from, to, it) => days.filter(d => d > from && d <= to).reduce((a, d) => a + (byDay[d][it] || 0), 0);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
-  const max = Math.max(1, ...items.flatMap(it => [sum(cut1, today, it), sum(cut2, cut1, it)]));
+  // bars share a scale only with items in the same unit
+  const maxFor = k => Math.max(1, ...items.filter(x => isG(x) === isG(k)).flatMap(it => [sum(cut1, today, it), sum(cut2, cut1, it)]));
 
   let html = `<h1>Wastage</h1>
-    <p class="sub">Weight thrown away at closing, recorded by the guides. Last 8 weeks.</p>`;
+    <p class="sub">What's thrown away at closing, recorded by the guides. Kofte and falafel are counted; sweet potato and chicken are weighed. Last 8 weeks.</p>`;
   if (!days.length) {
     m.innerHTML = html + `<div class="empty">Nothing recorded yet. It appears here after the first closing is signed.</div>`;
     return;
   }
   html += `<div class="glab">Last 7 days against the 7 before <span class="ln"></span></div><div class="wbars">`;
   items.forEach(it => {
-    const a = sum(cut1, today, it), b = sum(cut2, cut1, it);
-    html += `<div class="wbar"><span class="wname">${esc(it)}</span>
+    const a = sum(cut1, today, it), b = sum(cut2, cut1, it), max = maxFor(it);
+    html += `<div class="wbar"><span class="wname">${esc(label(it))}</span>
       <span class="wtrack"><i style="width:${a / max * 100}%"></i><b style="width:${b / max * 100}%"></b></span>
-      <span class="wval">${g(a)} <small>${b ? (a > b ? '▲' : a < b ? '▼' : '=') + ' from ' + g(b) : ''}</small></span></div>`;
+      <span class="wval">${fmt(it, a)} <small>${b ? (a > b ? '▲' : a < b ? '▼' : '=') + ' from ' + fmt(it, b) : ''}</small></span></div>`;
   });
+  const anyG = items.some(isG), anyN = items.some(k => !isG(k));
   html += `</div><div class="wkey"><i></i> last 7 days <b></b> the 7 before</div>
     <div class="glab">Each night <span class="ln"></span></div>
-    <div class="wtablewrap"><table class="wtable"><tr><th>Day</th>${items.map(it => `<th>${esc(it)}</th>`).join('')}<th>Total</th></tr>`;
+    <div class="wtablewrap"><table class="wtable"><tr><th>Day</th>${items.map(it => `<th>${esc(label(it))}</th>`).join('')}${
+      anyN ? '<th>Counted</th>' : ''}${anyG ? '<th>Weighed</th>' : ''}</tr>`;
   days.forEach(d => {
-    const tot = items.reduce((a, it) => a + (byDay[d][it] || 0), 0);
+    const totG = items.filter(isG).reduce((a, it) => a + (byDay[d][it] || 0), 0);
+    const totN = items.filter(k => !isG(k)).reduce((a, it) => a + (byDay[d][it] || 0), 0);
     html += `<tr><td>${new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
-      ${items.map(it => `<td>${byDay[d][it] != null ? g(byDay[d][it]) : '—'}</td>`).join('')}<td><b>${g(tot)}</b></td></tr>`;
+      ${items.map(it => `<td>${byDay[d][it] != null ? fmt(it, byDay[d][it]) : '—'}</td>`).join('')}${
+      anyN ? `<td><b>${totN} pieces</b></td>` : ''}${anyG ? `<td><b>${g(totG)}</b></td>` : ''}</tr>`;
   });
   m.innerHTML = html + `</table></div>`;
 }
