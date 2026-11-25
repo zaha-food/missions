@@ -559,9 +559,9 @@ function renderSolo(now, worstId, lateAgo) {
     if (e) b.style.minHeight = Math.max(52, Math.min(170, e * 1.5)) + 'px';
     b.innerHTML = `<span class="tln">${isDone ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>' : ''}${esc(o.checks.name)}</span>
       ${right}
-      <span class="tlm">${[e ? '~' + e + ' min' : '',
-        // when it can be started: its window opening, which is what the iPad enforces
-        o.due_at ? 'done by ' + hhmm(o.due_at) : ''].filter(Boolean).join(' · ')}</span>`;
+      <span class="tlm">${o.due_at ? `<b class="tlby">Done by ${hhmm(o.due_at)}</b>` : '<span></span>'}${
+        // the deadline reads first; how long it takes sits quietly on the right
+        e ? `<span class="tlmin">~${e} min</span>` : ''}</span>`;
     if (o.status === 'missed') return b;
     b.onclick = isDone ? () => openDone(o) : () => { STATE.focusId = o.id; render(); };
     return b;

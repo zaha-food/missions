@@ -136,10 +136,10 @@ async function viewTasks() {
         // each at its START, with when it must be done by — like the iPad
         if (s.pattern === 'set_times') (s.times || []).map(t5).sort().forEach(t => {
           const st = toMins(t) - (s.lead_minutes ?? 30);
-          entries.push({ ...base, t: st, end: toMins(t), time: fromMins(st), sub: summary(c) + ' · done by ' + t });
+          entries.push({ ...base, t: st, end: toMins(t), time: fromMins(st), sub: 'Done by ' + t + ' · ' + summary(c) });
         });
         else entries.push({ ...base, t: toMins(s.window_start || s.window_end), end: toMins(s.window_end),
-          time: t5(s.window_start || s.window_end), sub: summary(c) + (s.window_end ? ' · done by ' + t5(s.window_end) : '') });
+          time: t5(s.window_start || s.window_end), sub: (s.window_end ? 'Done by ' + t5(s.window_end) + ' · ' : '') + summary(c) });
       });
       if (anyTime.length) html += `<div class="aany"><div class="aanyh">Any time</div>${anyTime.map(e =>
         `<button class="acard" data-task="${e.id}"><span class="atitle">${esc(e.title)}</span><span class="asub">${esc(e.sub)}</span></button>`).join('')}</div>`;

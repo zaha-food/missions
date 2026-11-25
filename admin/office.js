@@ -130,7 +130,7 @@ async function viewTodayV2() {
     // every task at its START, with when it must be done by
     const st = o.appears_at && new Date(fixIso(o.appears_at)) < new Date(fixIso(o.due_at)) ? o.appears_at : o.due_at;
     entries.push({ ...e, t: minsOfIso(st), end: minsOfIso(o.due_at), time: hhmm(st),
-      sub: ['done by ' + hhmm(o.due_at), e.sub].filter(Boolean).join(' · ') });
+      sub: ['Done by ' + hhmm(o.due_at), e.sub].filter(Boolean).join(' · ') });
   });
   const marks = [{ t: nowM, label: 'Now ' + hhmm(new Date().toISOString()), cls: 'now' }];
   if (opens) marks.push({ t: toMins(opens), label: 'Doors open ' + opens, cls: 'doors' });

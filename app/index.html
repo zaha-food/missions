@@ -448,7 +448,11 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
   font-family:inherit;color:var(--charcoal);cursor:pointer}
 .tln{font-size:15px;font-weight:500;display:flex;align-items:center;gap:8px}
 .tln .tick2{width:20px;height:20px}
-.tlm{grid-column:1/-1;font-size:12px;color:#8a8681;font-variant-numeric:tabular-nums}
+.tlm{grid-column:1/-1;display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  font-size:12px;color:#8a8681;font-variant-numeric:tabular-nums}
+.tlby{font-size:13px;font-weight:600;color:#3d3b38}
+.tlc.done .tlby,.tlc.missed .tlby{color:#8a8681;font-weight:500}
+.tlmin{font-size:11px;color:#a09c96}
 .tlc.late{border:2px solid var(--fail);border-left:6px solid var(--fail)}
 .tlc.now{border:2px solid var(--clay)}
 .tlc.part{border:2px solid var(--warn)}
@@ -514,6 +518,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>
