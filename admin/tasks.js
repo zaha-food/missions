@@ -133,10 +133,13 @@ async function viewTasks() {
         if (s && s.pattern !== 'on_demand' && c.kind !== 'reminder' && daysWords(s.days) !== 'Mon–Fri') tags.push(daysWords(s.days));
         const base = { id: c.id, title: c.name, sub: summary(c), chip: tags.join(' · '), chipCls: s && !s.active ? 'warn' : 'grey' };
         if (!s || s.pattern === 'on_demand' || c.kind === 'reminder') return anyTime.push(base);
-        if (s.pattern === 'set_times') (s.times || []).map(t5).sort().forEach(t =>
-          entries.push({ ...base, t: toMins(t), time: t }));
+        // each at its START, with when it must be done by — like the iPad
+        if (s.pattern === 'set_times') (s.times || []).map(t5).sort().forEach(t => {
+          const st = toMins(t) - (s.lead_minutes ?? 30);
+          entries.push({ ...base, t: st, end: toMins(t), time: fromMins(st), sub: summary(c) + ' · done by ' + t });
+        });
         else entries.push({ ...base, t: toMins(s.window_start || s.window_end), end: toMins(s.window_end),
-          time: t5(s.window_start || s.window_end), sub: summary(c) + (s.window_end ? ' · due ' + t5(s.window_end) : '') });
+          time: t5(s.window_start || s.window_end), sub: summary(c) + (s.window_end ? ' · done by ' + t5(s.window_end) : '') });
       });
       if (anyTime.length) html += `<div class="aany"><div class="aanyh">Any time</div>${anyTime.map(e =>
         `<button class="acard" data-task="${e.id}"><span class="atitle">${esc(e.title)}</span><span class="asub">${esc(e.sub)}</span></button>`).join('')}</div>`;

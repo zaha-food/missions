@@ -533,6 +533,10 @@ function renderSolo(now, worstId, lateAgo) {
   const keep = dl.scrollTop;
   dl.innerHTML = '';
 
+  // Every task sits on the timeline at its START — when staff should begin
+  // it — and its card says when it must be done by. Due times, lateness and
+  // alerts are unchanged; this is only how it is drawn.
+  const startOf = o => o.appears_at && o.due_at && new Date(o.appears_at) < new Date(o.due_at) ? o.appears_at : o.due_at;
   const card = o => {
     const d = STATE.done[o.id];
     const isDone = o.status === 'done' && !partDone(o);
@@ -547,7 +551,8 @@ function renderSolo(now, worstId, lateAgo) {
       : partDone(o) ? `<span class="prog2">${d.done} of ${d.total}</span>`
       : got ? `<span class="prog2">${got} of ${dr.total}</span>`
       : st2 === 'late' ? `<span class="lateage">${lateAgo(o)}</span>`
-      : notYet(o) ? `<span class="opens">${opensTag(o)}</span>` : '';
+      // the rail already shows when it opens, so the tag stays short
+      : notYet(o) ? `<span class="opens">${locked(o) ? 'Not open yet' : 'Unlocked for testing'}</span>` : '';
     const b = document.createElement(o.status === 'missed' ? 'div' : 'button');
     b.className = `tlc ${st2}` + (f && o.id === f.id ? ' sel' : '') + (o.id === worstId ? ' worst' : '');
     // a long task is a tall block — Opening reads as the morning, a temp log as a moment
@@ -556,8 +561,7 @@ function renderSolo(now, worstId, lateAgo) {
       ${right}
       <span class="tlm">${[e ? '~' + e + ' min' : '',
         // when it can be started: its window opening, which is what the iPad enforces
-        o.appears_at && o.due_at && (new Date(o.due_at) - new Date(o.appears_at)) >= 20 * 60000
-          ? 'from ' + hhmm(o.appears_at) + ' · due ' + hhmm(o.due_at) : ''].filter(Boolean).join(' · ')}</span>`;
+        o.due_at ? 'done by ' + hhmm(o.due_at) : ''].filter(Boolean).join(' · ')}</span>`;
     if (o.status === 'missed') return b;
     b.onclick = isDone ? () => openDone(o) : () => { STATE.focusId = o.id; render(); };
     return b;
@@ -573,7 +577,7 @@ function renderSolo(now, worstId, lateAgo) {
     dl.appendChild(box);
   }
 
-  const timed = mine.filter(o => o.due_at).map(o => ({ t: mins(o.due_at), o }));
+  const timed = mine.filter(o => o.due_at).map(o => ({ t: mins(startOf(o)), o }));
   const opens = STATE.opensAt ? STATE.opensAt.slice(0, 5) : null;
   if (opens) {
     const [h, m] = opens.split(':').map(Number);
@@ -604,7 +608,7 @@ function renderSolo(now, worstId, lateAgo) {
     }
     const row = document.createElement('div');
     row.className = 'tli' + (it.t < nowM ? ' past' : '');
-    row.innerHTML = `<span class="tlt">${hhmm(it.o.due_at)}</span><span class="tldot"></span>`;
+    row.innerHTML = `<span class="tlt">${hhmm(startOf(it.o))}</span><span class="tldot"></span>`;
     row.appendChild(card(it.o));
     rail.appendChild(row);
   });
