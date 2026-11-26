@@ -59,7 +59,7 @@ async function viewTasks() {
   await doorsOpen();
   await ensureStations();
   const { data: checks, error } = await db.from('checks')
-    .select(`id,kind,name,est_minutes,archived_at,station_id,
+    .select(`id,kind,name,est_minutes,archived_at,station_id,done_by,
              check_versions(id,version_no,status),
              schedules(pattern,window_start,window_end,times,interval_hours,days,active,lead_minutes,alert_after)`)
     .is('archived_at', null);
@@ -131,7 +131,7 @@ async function viewTasks() {
         const tags = [];
         if (s && !s.active) tags.push('Switched off');
         if (s && s.pattern !== 'on_demand' && c.kind !== 'reminder' && daysWords(s.days) !== 'Mon–Fri') tags.push(daysWords(s.days));
-        const base = { id: c.id, title: c.name, sub: summary(c), chip: tags.join(' · '), chipCls: s && !s.active ? 'warn' : 'grey' };
+        const base = { id: c.id, title: c.name, sub: summary(c), chip: tags.join(' · '), chipCls: s && !s.active ? 'warn' : 'grey', by: c.done_by };
         if (!s || s.pattern === 'on_demand' || c.kind === 'reminder') return anyTime.push(base);
         // each at its START, with when it must be done by — like the iPad
         if (s.pattern === 'set_times') (s.times || []).map(t5).sort().forEach(t => {
@@ -166,7 +166,7 @@ async function openTask(id) {
     .select('*,check_versions(id,version_no,status),schedules(*)').eq('id', id).single();
   if (error) return m.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
   const live = (c.check_versions || []).sort((a, b) => b.version_no - a.version_no)[0];
-  T = { id: c.id, kind: c.kind, name: c.name, station_id: c.station_id, intro: c.intro || '',
+  T = { id: c.id, kind: c.kind, name: c.name, station_id: c.station_id, intro: c.intro || '', done_by: c.done_by || null,
         est: c.est_minutes || '', versionNo: live ? live.version_no : 0, versionId: live ? live.id : null,
         sched: blankSched(), items: [], dirty: false, isNew: false };
   if (c.schedules && c.schedules[0]) T.sched = { ...T.sched, ...c.schedules[0] };
@@ -200,7 +200,7 @@ function blankSched() {
 /* NEW TASK — one question per screen, in plain words. The side is the
    tab you were on. It is saved at the end in one go. */
 function newTaskWizard(sideId) {
-  const W = { step: 1, name: '', station_id: sideId || sides()[0]?.id, kind: null, sched: blankSched(), items: [], more: false };
+  const W = { step: 1, name: '', station_id: sideId || sides()[0]?.id, kind: null, sched: blankSched(), items: [], more: false, done_by: '' };
   const dr = $('drawer'), p = $('dpanel');
   dr.classList.add('open');
   const stnOf = () => STATIONS.find(x => x.id === W.station_id) || {};
@@ -220,7 +220,9 @@ function newTaskWizard(sideId) {
       title = 'What’s the task called?';
       body = field('Name', `<input class="finp" id="z_name" value="${esc(W.name)}" placeholder="e.g. Mid-afternoon toilet check" autofocus>`) +
         field('Which side does it?', `<div class="opts">${sides().map(x =>
-          `<button class="opt ${x.id === W.station_id ? 'on' : ''}" data-side="${x.id}">${esc(sideName(x))} <small>· ${esc(sideWhere(x))}</small></button>`).join('')}</div>`);
+          `<button class="opt ${x.id === W.station_id ? 'on' : ''}" data-side="${x.id}">${esc(sideName(x))} <small>· ${esc(sideWhere(x))}</small></button>`).join('')}</div>`) +
+        field('Who does it?', `<div class="opts">${[['lead_guide', 'Lead guide'], ['guide', 'Guide'], ['', 'Anyone']].map(([v, l]) =>
+          `<button class="opt ${W.done_by === v ? 'on' : ''}" data-by="${v}">${l}</button>`).join('')}</div>`, 'Shown as a colour on the timeline: blue for Lead guide, green for Guide.');
     }
     if (W.step === 2) {
       title = 'What do staff do?';
@@ -267,6 +269,7 @@ function newTaskWizard(sideId) {
       body = `<div class="tcard"><div class="kv">
           <span>Name</span><b>${esc(W.name)}</b>
           <span>Side</span><b>${esc(sideName(stnOf()))} · ${esc(sideWhere(stnOf()))}</b>
+          <span>Who does it</span><b>${W.done_by === 'lead_guide' ? 'Lead guide' : W.done_by === 'guide' ? 'Guide' : 'Anyone'}</b>
           <span>What staff do</span><b>${esc(KIND_WORDS[W.kind][0])}</b>
           ${W.kind !== 'reminder' ? `<span>When</span><b>${esc(whenSentence(S, W.kind))}</b>` : ''}
           ${['checklist','temperature','count'].includes(W.kind) ? `<span>${W.items.length} ${W.kind === 'checklist' ? 'job' : 'item'}${W.items.length === 1 ? '' : 's'}</span>
@@ -302,6 +305,7 @@ function newTaskWizard(sideId) {
     g('z_cancel').onclick = () => dr.classList.remove('open');
     if (g('z_back')) g('z_back').onclick = () => { collect(); W.step = list[at - 2]; draw(); };
     p.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { collect(); W.station_id = b.dataset.side; draw(); });
+    p.querySelectorAll('[data-by]').forEach(b => b.onclick = () => { collect(); W.done_by = b.dataset.by; draw(); });
     p.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => {
       W.kind = b.dataset.kind;
       W.sched.pattern = W.kind === 'incident' ? 'on_demand' : W.kind === 'temperature' ? 'set_times' : 'once_daily';
@@ -332,7 +336,7 @@ function newTaskWizard(sideId) {
       if (W.step === 4 && !W.items.length) return alert('Add at least one.');
       if (W.step < 5) { W.step = list[at]; return draw(); }
       // create it
-      T = { id: null, kind: W.kind, name: W.name.trim(), station_id: W.station_id, intro: '', est: '',
+      T = { id: null, kind: W.kind, name: W.name.trim(), station_id: W.station_id, intro: '', est: '', done_by: W.done_by || null,
             versionNo: 0, versionId: null, sched: W.sched, items: W.items, dirty: true, isNew: true };
       dr.classList.remove('open');
       await saveTask(g('z_next'));
@@ -459,6 +463,7 @@ function drawTask() {
       <div class="kv">
         <span>Name</span><b>${esc(T.name || '—')}</b>
         <span>Side</span><b>${esc(stn ? stn.name : '—')}</b>
+        <span>Done by</span><b>${T.done_by === 'lead_guide' ? '<span class="bytag by-lead_guide" style="margin:0">Lead guide</span>' : T.done_by === 'guide' ? '<span class="bytag by-guide" style="margin:0">Guide</span>' : 'Anyone'}</b>
         <span>Shown at the top on the iPad</span><b>${esc(T.intro || '—')}</b>
         ${k !== 'checklist' ? `<span>Roughly how long</span><b>${T.est ? esc(T.est) + ' min' : '—'}</b>` : ''}
       </div>
@@ -750,17 +755,22 @@ function editWhen() {
 /* ------------------------------------------------------------ details */
 
 function editDetails() {
-  const D = { name: T.name, station_id: T.station_id, intro: T.intro, est: T.est };
+  const D = { name: T.name, station_id: T.station_id, intro: T.intro, est: T.est, done_by: T.done_by || '' };
   const body =
     field('Name', `<input class="finp" id="d_name" value="${esc(D.name)}" placeholder="e.g. Closing">`) +
     field('Side', `<select class="finp" id="d_st">${STATIONS.map(s =>
       `<option value="${s.id}" ${s.id === D.station_id ? 'selected' : ''}>${esc(s.name)}${s.areas ? ' · ' + esc(s.areas.name) : ''}</option>`).join('')}</select>`) +
+    field('Done by — shown as a colour on the timeline', `<select class="finp" id="d_by">
+        <option value="" ${!D.done_by ? 'selected' : ''}>Anyone</option>
+        <option value="lead_guide" ${D.done_by === 'lead_guide' ? 'selected' : ''}>Lead guide (blue)</option>
+        <option value="guide" ${D.done_by === 'guide' ? 'selected' : ''}>Guide (green)</option></select>`) +
     field('Shown at the top on the iPad', `<textarea class="finp ta" id="d_intro">${esc(D.intro || '')}</textarea>`, 'Optional. One or two sentences.') +
     (T.kind !== 'checklist' ? field('Roughly how long (minutes)', `<input class="finp sm" type="number" min="0" id="d_est" value="${esc(D.est || '')}">`) : '');
   const p = panel('Details', 'Changes are kept here until you press “Save changes” on the task.', body, () => {
     const g = id => p.querySelector('#' + id);
     if (!g('d_name').value.trim()) { alert('Give the task a name.'); return false; }
     T.name = g('d_name').value.trim(); T.station_id = g('d_st').value; T.intro = g('d_intro').value;
+    T.done_by = g('d_by').value || null;
     if (g('d_est')) T.est = g('d_est').value;
   });
 }
@@ -779,6 +789,7 @@ async function saveTask(fromBtn) {
     // a checklist's length is its lines added up
     const lineMins = k === 'checklist' ? T.items.reduce((a, x) => a + (+x.est_minutes || 0), 0) : 0;
     const payload = { station_id: T.station_id, kind: k, name: T.name.trim(), intro: (T.intro || '').trim() || null,
+                      done_by: T.done_by || null,
                       est_minutes: k === 'checklist' ? (lineMins || null) : (T.est ? +T.est : null) };
     if (checkId) {
       const { error } = await db.from('checks').update(payload).eq('id', checkId);

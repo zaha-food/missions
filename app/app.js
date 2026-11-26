@@ -202,7 +202,7 @@ async function load() {
   STATE.reminders = rem || [];
 
   const { data: occ, error: e2 } = await db.from('occurrences')
-    .select('id,due_at,appears_at,status,station_id,check_version_id,checks(id,name,kind,intro,est_minutes)')
+    .select('id,due_at,appears_at,status,station_id,check_version_id,checks(id,name,kind,intro,est_minutes,done_by)')
     .eq('service_date', todayLondon())
     .in('station_id', STATE.stations.map(s => s.id))
     .order('due_at');
@@ -539,6 +539,7 @@ function renderSolo(now, worstId, lateAgo) {
   const startOf = o => o.appears_at && o.due_at && new Date(o.appears_at) < new Date(o.due_at) ? o.appears_at : o.due_at;
   const card = o => {
     const d = STATE.done[o.id];
+    const by = o.checks.done_by;   // lead_guide | guide — blue | green
     const isDone = o.status === 'done' && !partDone(o);
     const st2 = isDone ? 'done' : o.status === 'missed' ? 'missed' : partDone(o) ? 'part'
       : locked(o) ? 'soon'
@@ -554,10 +555,11 @@ function renderSolo(now, worstId, lateAgo) {
       // the rail already shows when it opens, so the tag stays short
       : notYet(o) ? `<span class="opens">${locked(o) ? 'Not open yet' : 'Unlocked for testing'}</span>` : '';
     const b = document.createElement(o.status === 'missed' ? 'div' : 'button');
-    b.className = `tlc ${st2}` + (f && o.id === f.id ? ' sel' : '') + (o.id === worstId ? ' worst' : '');
+    b.className = `tlc ${st2}` + (by ? ' by-' + by : '') + (f && o.id === f.id ? ' sel' : '') + (o.id === worstId ? ' worst' : '');
     // a long task is a tall block — Opening reads as the morning, a temp log as a moment
     if (e) b.style.minHeight = Math.max(52, Math.min(170, e * 1.5)) + 'px';
-    b.innerHTML = `<span class="tln">${isDone ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>' : ''}${esc(o.checks.name)}</span>
+    b.innerHTML = `<span class="tln">${isDone ? '<span class="tick2"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>' : ''}${esc(o.checks.name)}${
+        by ? `<span class="bytag by-${by}">${by === 'lead_guide' ? 'Lead guide' : 'Guide'}</span>` : ''}</span>
       ${right}
       <span class="tlm">${o.due_at ? `<b class="tlby">Done by ${hhmm(o.due_at)}</b>` : '<span></span>'}${
         // the deadline reads first; how long it takes sits quietly on the right
@@ -608,7 +610,7 @@ function renderSolo(now, worstId, lateAgo) {
     }
     const row = document.createElement('div');
     row.className = 'tli' + (it.t < nowM ? ' past' : '');
-    row.innerHTML = `<span class="tlt">${hhmm(startOf(it.o))}</span><span class="tldot"></span>`;
+    row.innerHTML = `<span class="tlt">${hhmm(startOf(it.o))}</span><span class="tldot${it.o.checks.done_by ? ' by-' + it.o.checks.done_by : ''}"></span>`;
     row.appendChild(card(it.o));
     rail.appendChild(row);
   });
@@ -825,7 +827,7 @@ function drawDone() {
   panel().innerHTML = `
     <div class="jprog">
       <button class="pback">← Back</button>
-      <div class="jtop"><b>${esc(o.checks.name)}</b>
+      <div class="jtop"><b>${esc(o.checks.name)}${o.checks.done_by ? ` <span class="bytag by-${o.checks.done_by}">${o.checks.done_by === 'lead_guide' ? 'Lead guide' : 'Guide'}</span>` : ''}</b>
         ${steps.length ? `<span>${doneN + n} / ${steps.length}</span>` : ''}</div>
       ${steps.length ? `<div class="ctrack"><i style="width:${Math.round((doneN + n) / steps.length * 100)}%"></i></div>` : ''}
     </div>
@@ -914,7 +916,7 @@ function drawJob() {
   panel().innerHTML = `
     <div class="jprog">
       <button class="pback">← Back</button>
-      <div class="jtop"><b>${esc(o.checks.name)}</b>
+      <div class="jtop"><b>${esc(o.checks.name)}${o.checks.done_by ? ` <span class="bytag by-${o.checks.done_by}">${o.checks.done_by === 'lead_guide' ? 'Lead guide' : 'Guide'}</span>` : ''}</b>
         <span>${doneN} / ${total}</span></div>
       <div class="ctrack"><i style="width:${total ? Math.round(doneN/total*100) : 0}%"></i></div>
     </div>

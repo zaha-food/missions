@@ -431,6 +431,15 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .tlc.soon{background:#F7F6F3;border-style:dashed;border-color:var(--stone)}
 .tlc.soon .tln{color:#6d6a65}
 .locked{opacity:.35;cursor:not-allowed}
+/* who does it — blue for Lead guide, green for Guide (a brighter green
+   than the dark "done" green). Late and missed stay red and win. */
+:root{--lead:#2B63B8;--guide:#3A9D4F}
+.bytag{display:inline-block;white-space:nowrap;margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;padding:3px 7px;color:#fff;vertical-align:middle}
+.jtop .bytag,.focus .jtop .bytag{font-size:10px;font-weight:700;color:#fff}
+.bytag.by-lead_guide{background:var(--lead)}
+.bytag.by-guide{background:var(--guide)}
+.tlc.done .bytag,.tlc.missed .bytag{opacity:.55}
 /* the timeline */
 .tlany{border:1px dashed var(--stone);padding:10px;margin-bottom:16px;background:#fff}
 .tlanyh{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#8a8681;margin:0 0 8px 2px}
@@ -469,6 +478,11 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .tlmark.doors:before{border-top:1px dashed var(--clay)}
 .tlmark.doors span{background:#fff;color:var(--clay);border:1px solid var(--clay)}
 .cols.hasLate .tlc:not(.late):not(.sel){opacity:.55}
+.tlc.by-lead_guide:not(.late):not(.missed){border-left:6px solid var(--lead)}
+.tlc.by-guide:not(.late):not(.missed){border-left:6px solid var(--guide)}
+.tldot.by-lead_guide{border-color:var(--lead)}
+.tldot.by-guide{border-color:var(--guide)}
+.tli:has(.tlc.done) .tldot.by-lead_guide,.tli:has(.tlc.done) .tldot.by-guide{background:var(--pass);border-color:var(--pass)}
 .donetoggle{display:flex;justify-content:space-between;width:100%;margin-top:14px;padding:14px 16px;
   background:none;border:1px solid var(--mist);font-family:inherit;font-size:13px;font-weight:600;
   letter-spacing:.06em;color:#6d6a65;cursor:pointer}
@@ -518,6 +532,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=32"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

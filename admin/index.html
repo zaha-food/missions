@@ -257,6 +257,15 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
 }
 /* ---- menu groups ---- */
 .navg{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#a8a49e;padding:16px 18px 6px;font-weight:600}
+/* who does it: blue Lead guide, green Guide */
+:root{--lead:#2B63B8;--guide:#3A9D4F}
+.bytag{display:inline-block;white-space:nowrap;margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;color:#fff !important;vertical-align:middle}
+.bytag.by-lead_guide{background:var(--lead)}
+.bytag.by-guide{background:var(--guide)}
+.acard.by-lead_guide:not(.st-late):not(.st-missed){border-left:6px solid var(--lead)}
+.acard.by-guide:not(.st-late):not(.st-missed){border-left:6px solid var(--guide)}
+.adot.by-lead_guide{border-color:var(--lead)}
+.adot.by-guide{border-color:var(--guide)}
 /* ---- the shared vertical timeline ---- */
 .arail{position:relative;padding:6px 0 30px 74px}
 .arail:before{content:"";position:absolute;left:62px;top:0;bottom:0;width:2px;background:var(--stone)}
@@ -366,7 +375,7 @@ input[type=date]{border:1px solid var(--mist);background:#fff;padding:10px 12px;
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
 <script src="admin.js?v=5"></script>
-<script src="tasks.js?v=5"></script>
-<script src="office.js?v=4"></script>
+<script src="tasks.js?v=6"></script>
+<script src="office.js?v=5"></script>
 </body>
 </html>

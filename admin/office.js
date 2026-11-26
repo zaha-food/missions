@@ -25,9 +25,9 @@ function railHTML(entries, marks, attr) {
     if (it.k === 'm') { out += `<div class="amark ${it.cls || ''}"><span>${esc(it.label)}</span></div>`; return; }
     const h = it.end && it.end > it.t ? Math.max(54, Math.min(180, (it.end - it.t) * 1.1)) : 0;
     out += `<div class="aitem">
-        <span class="atime">${esc(it.time)}</span><span class="adot ${it.cls || ''}"></span>
-        <button class="acard ${it.cls || ''}" ${attr}="${esc(it.id)}" ${h ? `style="min-height:${h}px"` : ''}>
-          <span class="atitle">${esc(it.title)}</span>
+        <span class="atime">${esc(it.time)}</span><span class="adot ${it.cls || ''} ${it.by ? 'by-' + it.by : ''}"></span>
+        <button class="acard ${it.cls || ''} ${it.by ? 'by-' + it.by : ''}" ${attr}="${esc(it.id)}" ${h ? `style="min-height:${h}px"` : ''}>
+          <span class="atitle">${esc(it.title)}${it.by ? `<span class="bytag by-${it.by}">${it.by === 'lead_guide' ? 'Lead guide' : 'Guide'}</span>` : ''}</span>
           ${it.chip ? `<span class="chip ${it.chipCls || 'grey'}">${esc(it.chip)}</span>` : ''}
           ${it.sub ? `<span class="asub">${esc(it.sub)}</span>` : ''}
         </button></div>`;
@@ -65,7 +65,7 @@ async function viewTodayV2() {
   await ensureStations();
   const day = today();
   const [{ data: occ, error }, { data: dn }, { data: cas }, opens] = await Promise.all([
-    db.from('occurrences').select(`id,due_at,appears_at,status,station_id,checks(name,kind),
+    db.from('occurrences').select(`id,due_at,appears_at,status,station_id,checks(name,kind,done_by),
         records(id,signed_at,was_late,minutes_late,steps_total,steps_done,staff(name))`)
       .eq('service_date', day).order('due_at'),
     db.rpc('board_done', { p_date: day }),
@@ -124,7 +124,7 @@ async function viewTodayV2() {
     const chip = s === 'done' ? 'Signed' : s === 'donelate' ? r.minutes_late + ' min late' : s === 'part' ? `${d.done} of ${d.total} done`
       : s === 'late' ? lateBy(o) : s === 'missed' ? 'Missed' : s === 'now' ? 'Open now' : s === 'any' ? 'Any time' : 'Opens ' + hhmm(o.appears_at);
     const chipCls = { done: 'pass', donelate: 'warn', part: 'warn', late: 'fail', missed: 'fail' }[s] || 'grey';
-    const e = { id: o.id, title: o.checks.name, chip, chipCls, cls: 'st-' + s,
+    const e = { id: o.id, title: o.checks.name, chip, chipCls, cls: 'st-' + s, by: o.checks.done_by,
       sub: r ? 'by ' + (r.staff?.name || '?') + ' at ' + hhmm(r.signed_at) : '' };
     if (!o.due_at) { anyTime.push(e); return; }
     // every task at its START, with when it must be done by
