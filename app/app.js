@@ -223,6 +223,9 @@ async function load() {
   // who signed each done task, and how much of it is really done —
   // a part-done task stays on the board until its last line is finished
   const { data: dn } = await db.rpc('board_done', { p_date: todayLondon() });
+  // readings that were out and still need checking again
+  try { const { data: rc, error: re } = await db.rpc('open_rechecks'); STATE.rechecks = re ? [] : (rc || []); }
+  catch { STATE.rechecks = []; }
   STATE.done = {};
   (dn || []).forEach(d => STATE.done[d.occurrence_id] = d);
   IDB.put('board', { k: 'last', stations: STATE.stations, shifts: STATE.shifts,
@@ -511,7 +514,9 @@ function renderSolo(now, worstId, lateAgo) {
 
   $('shead').innerHTML = `<div class="ctop"><span class="cname2">${esc(st.name)}</span>
       <span class="ccount">${doneN} / ${mine.length}</span></div>
-    <div class="ctrack"><i style="width:${mine.length ? Math.round(doneN / mine.length * 100) : 0}%"></i></div>`;
+    <div class="ctrack"><i style="width:${mine.length ? Math.round(doneN / mine.length * 100) : 0}%"></i></div>
+    ${recheckBar(st.id, now)}`;
+  $('shead').querySelectorAll('[data-rc]').forEach(b => b.onclick = () => recheckPad(b.dataset.rc));
 
   // what belongs on the left: the one picked, else what is due, else part-done, else the next
   const live = o => o.status === 'pending' || partDone(o);
@@ -641,6 +646,91 @@ function renderSolo(now, worstId, lateAgo) {
   partDone(f) ? openDone(f, true) : openCheck(f, true);
 }
 
+/* ------------------------------------------------------------ re-checks */
+
+/* A reading that was out of range is checked again 30 minutes later.
+   It sits at the top of the board, in red, until it is back in range or a
+   manager closes it — it can't scroll away like a timeline card. */
+function recheckBar(stationId, now) {
+  const list = (STATE.rechecks || []).filter(r => r.station_id === stationId);
+  if (!list.length) return '';
+  return `<div class="rcbar">${list.map(r => {
+    const due = r.due ? new Date(r.due) : null;
+    const late = due && now > due;
+    const sub = r.escalated
+      ? `Still ${r.recheck_value}°C at ${hhmm(r.recheck_at)} — managers told. Check again when it's fixed.`
+      : `Was ${r.first_value}°C at ${hhmm(r.first_at)}${r.action ? ' · ' + esc(r.action) : ''}`;
+    return `<button class="rcrow ${late || r.escalated ? 'late' : ''}" data-rc="${r.id}">
+        <span class="rct"><b>Re-check: ${esc(r.unit)}</b><i>${sub}</i></span>
+        <span class="rcwhen">${r.escalated ? 'Check again' : due ? (late ? 'Due ' + hhmm(r.due) : 'At ' + hhmm(r.due)) : 'Now'}</span>
+      </button>`;
+  }).join('')}</div>`;
+}
+
+function recheckPad(id) {
+  const r = (STATE.rechecks || []).find(x => x.id === id);
+  if (!r) return;
+  const u = { limit_kind: r.limit_kind, limit_c: r.limit_c };
+  let buf = '';
+  const ov = document.createElement('div');
+  ov.className = 'ov';
+  const draw = () => {
+    const v = parseFloat(buf), has = buf !== '' && !isNaN(v);
+    const pass = has && (u.limit_kind === 'max' ? v <= u.limit_c : v >= u.limit_c);
+    ov.innerHTML = `<div class="pad">
+      <div class="padh">
+        <div class="padlim">Re-check · was ${r.first_value}°C at ${hhmm(r.first_at)}</div>
+        <div class="padname">${esc(r.unit)}</div>
+        <div class="padnum">${buf === '' ? '—' : esc(buf)}<small>°C</small></div>
+        ${has ? `<div class="verdict ${pass ? 'pass' : 'fail'}">${pass ? 'In range' : tooFar(u)}</div>` : ''}
+      </div>
+      <div class="keys">
+        ${'123456789'.split('').map(n => `<button class="key" data-k="${n}">${n}</button>`).join('')}
+        <button class="key" data-k="-">−</button>
+        <button class="key" data-k="0">0</button>
+        <button class="key" data-k=".">.</button>
+        <button class="key wide" data-k="del">⌫</button>
+        <button class="key save ${has ? '' : 'off'}" data-k="ok" ${has ? '' : 'disabled'}>Save</button>
+      </div>
+      <button class="padcancel">Cancel</button>
+    </div>`;
+    ov.querySelectorAll('[data-k]').forEach(b => b.onclick = () => {
+      const k = b.dataset.k;
+      if (k === 'del') buf = buf.slice(0, -1);
+      else if (k === 'ok') { ov.remove(); return signRecheck(r, v); }
+      else if (k === '-') buf = buf.startsWith('-') ? buf.slice(1) : '-' + buf;
+      else if (k === '.' && buf.includes('.')) { /* one only */ }
+      else buf += k;
+      draw();
+    });
+    ov.querySelector('.padcancel').onclick = () => ov.remove();
+  };
+  draw();
+  document.body.appendChild(ov);
+}
+
+function signRecheck(r, v) {
+  askPin(async pin => {
+    let data, error;
+    try { ({ data, error } = await db.rpc('submit_recheck', { p_pin: pin, p_ca: r.id, p_value: v })); }
+    catch (e) { error = e; }
+    if (error) return { error: navigator.onLine ? 'Could not save — try again' : 'No connection — try again when the wifi is back' };
+    if (!data.ok) return { error: data.error };
+    const ov = document.createElement('div');
+    ov.className = 'ov';
+    ov.innerHTML = `<div class="donebox doneb">
+      <div class="tickc ${data.passed ? '' : 'warn'}"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+      <h2 style="font-size:23px">${data.passed ? 'Back in range' : 'Still out of range'}</h2>
+      <p>${data.passed
+        ? `${esc(r.unit)} is ${v}°C. Closed — the managers have been told.`
+        : `${esc(r.unit)} is ${v}°C. The managers have been alerted and will decide what happens next. `
+          + `Until they do, don't use the food that was in it.`}</p>
+      <button class="bigbtn" id="rcok">OK</button></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#rcok').onclick = () => { ov.remove(); load(); };
+  });
+}
+
 /* more than one incident form set up — ask which side it happened on */
 function pickIncident(list) {
   sheet().classList.add('open');
@@ -694,7 +784,7 @@ function pruneDrafts() {
 
 async function openCheck(o, inline) {
   const job = JOB = { occ: o, kind: o.checks.kind, items: [], ticked: new Set(), photos: {}, values: {}, skips: {},
-          tickAt: {}, alts: {}, readAt: {}, units: [], counts: [], helpers: [], tickBy: {}, lineBy: {}, inline: !!inline };
+          tickAt: {}, alts: {}, readAt: {}, units: [], counts: [], helpers: [], tickBy: {}, lineBy: {}, openLines: new Set(), inline: !!inline };
   if (!inline) sheet().classList.add('open');
   panel().innerHTML = `<div class="phead"><div class="ptitle">${esc(o.checks.name)}</div>
     <p class="pmeta">Loading…</p></div>`;
@@ -949,6 +1039,11 @@ function drawJob() {
     delete JOB.alts[id]; JOB.ticked.delete(id); delete JOB.tickAt[id]; saveDraft(); drawJob();
   });
   panel().querySelectorAll('[data-photo]').forEach(b => b.onclick = () => takePhoto(b.dataset.photo));
+  panel().querySelectorAll('[data-fold]').forEach(b => b.onclick = () => {
+    const id = b.dataset.fold;
+    JOB.openLines.has(id) ? JOB.openLines.delete(id) : JOB.openLines.add(id);
+    drawJob();
+  });
   panel().querySelectorAll('[data-guide]').forEach(b => b.onclick = () =>
     $('g' + b.dataset.guide).classList.toggle('open'));
   const forLine = (id, open) => {
@@ -1024,6 +1119,18 @@ function numsWithHeadings(nums) {
   return out;
 }
 
+/* A line with a long list (Closing's "what's left": 25 items) stays folded
+   to one row until someone opens it, so it doesn't push the rest of the
+   task off the screen. Short lists (3 fridges, 4 wastage items) stay open. */
+const FOLD_AT = 6;
+function foldedRow(x, temps, nums) {
+  const all = [...temps, ...nums];
+  const got = all.filter(u => JOB.values[u.id] !== undefined || JOB.skips[u.id]).length;
+  return `<div class="steptemps"><button class="foldrow ${got === all.length ? 'done' : ''}" data-fold="${x.id}">
+      <span>${got === all.length ? `All ${all.length} entered` : got ? `${got} of ${all.length} entered` : `${all.length} to enter`}</span>
+      <b>${got ? 'Show the list' : 'Open the list'} ▾</b></button></div>`;
+}
+
 function drawStep(x, i) {
   const on = JOB.ticked.has(x.id);
   const shot = JOB.photos[x.id];
@@ -1052,7 +1159,9 @@ function drawStep(x, i) {
         ${x.guidance_image ? `<img src="${esc(x.guidance_image)}" alt="How to do this" loading="lazy">` : ''}
       </div>` : ''}
     ${reads && alt ? `<div class="steptemps"><button class="salt" data-unalt="${x.id}">Change — record a reading instead</button></div>`
-      : reads ? `<div class="steptemps">${temps.map(drawUnit).join('')}${numsWithHeadings(nums)}</div>` : ''}`;
+      : reads > FOLD_AT && !JOB.openLines.has(x.id) ? foldedRow(x, temps, nums)
+      : reads ? `<div class="steptemps">${reads > FOLD_AT ? `<button class="foldbtn" data-fold="${x.id}">Hide the list ▴</button>` : ''}${
+          temps.map(drawUnit).join('')}${numsWithHeadings(nums)}</div>` : ''}`;
 }
 
 /* One row builder for temperatures and counts. Same shape as a checklist
@@ -1073,6 +1182,11 @@ function itemRow(it, kind, state, right, sub) {
     </div>${guide}`;
 }
 
+// the limit is the app's job, not something to read on every line —
+// it only appears when a reading is out
+const tooFar = u => u.limit_kind === 'min'
+  ? `Too cold — must be ${u.limit_c}°C or above` : `Too warm — must be ${u.limit_c}°C or below`;
+
 function drawUnit(u) {
   const sk = JOB.skips[u.id];
   if (sk) return itemRow(u, 'unit', 'skip', 'n/a', esc(sk));
@@ -1080,8 +1194,8 @@ function drawUnit(u) {
   const has = v !== undefined;
   const pass = has && (u.limit_kind === 'max' ? v <= u.limit_c : v >= u.limit_c);
   return itemRow(u, 'unit', has ? (pass ? 'pass' : 'fail') : '',
-    has ? v + '°' : 'tap',
-    `${u.limit_kind === 'min' ? 'at least' : 'no more than'} ${u.limit_c}°C`);
+    has ? v + '°' : '—',
+    !has ? 'Tap to enter' : pass ? 'In range' : tooFar(u));
 }
 
 /* WHO did each line. Everyone working the task joins once with their
@@ -1223,9 +1337,8 @@ function keypad(unitId) {
     ov.innerHTML = `<div class="pad">
       <div class="padh">
         <div class="padname">${esc(u.name)}</div>
-        <div class="padlim">${u.limit_kind === 'min' ? 'Must be at least' : 'Must be no more than'} ${u.limit_c}°C</div>
         <div class="padnum">${buf === '' ? '—' : esc(buf)}<small>°C</small></div>
-        ${has ? `<div class="verdict ${pass ? 'pass' : 'fail'}">${pass ? 'In range' : 'Out of range'}</div>` : ''}
+        ${has ? `<div class="verdict ${pass ? 'pass' : 'fail'}">${pass ? 'In range' : tooFar(u)}</div>` : ''}
       </div>
       <div class="keys">
         ${'123456789'.split('').map(n => `<button class="key" data-k="${n}">${n}</button>`).join('')}
@@ -1415,7 +1528,7 @@ function corrective(fails, i, sub) {
      "Walk-in chiller 12°C" genuinely does not: a chiller holds twenty
      things and the law wants to know which of them were at risk. */
   const unit    = (JOB ? [...(JOB.items || []), ...(JOB.units || [])] : []).find(x => x.name === f.unit) || {};
-  const store   = /storage|chiller|freez|fridge|ambient/i.test(unit.basis || f.unit || '');
+  const store   = /storage|chiller|freez|fridge|ambient|cold holding|bain marie/i.test((unit.basis || '') + ' ' + (f.unit || ''));
   const cooking = /cooking|calibrat|probe|core/i.test(unit.basis || f.unit || '');
   const knowsFood = !store && !cooking;          // the unit IS the food
 
@@ -1424,7 +1537,10 @@ function corrective(fails, i, sub) {
     : [];
   const cooling = /cooling/i.test(unit.basis || '');
   // cooked food not below 8°C in time cannot be saved by moving or reheating it
+  const fz = /freez/i.test(unit.basis || f.unit || '');
   const ACTS = cooling ? ['Binned it']
+    : store ? [`Moved the food to another ${fz ? 'freezer' : 'fridge'}`, 'Binned the food',
+               'Door was left open / adjusted it', 'Called engineer']
     : ['Binned it', 'Moved to another unit', 'Reheated', 'Called engineer'];
 
   let food = knowsFood ? f.unit : '', qty = '', act = '', override = null;
@@ -1445,7 +1561,8 @@ function corrective(fails, i, sub) {
             <i>${esc(basis)}</i><button class="tiny" id="fix">Change</button></div>
           <div><span>How far out</span><b>${Math.abs(f.value - f.limit).toFixed(1)}°C ${f.limit_kind === 'min' ? 'below' : 'above'}</b></div>
           <div><span>Who found it</span><b>${esc(sub.signed_by)}</b><i>just now</i></div>
-          <div><span>Back to normal</span><b>Re-check in 30 minutes</b></div>
+          <div><span>Back to normal</span><b>Re-check in 30 minutes</b>
+            <i>${store ? 'it appears at the top of the board' : 'not needed if you bin it'}</i></div>
           ${knowsFood ? `<div><span>Which food</span><b>${esc(f.unit)}</b>
             <i>this is what you probed</i><button class="tiny" id="notit">Not that</button></div>` : ''}
         </div>

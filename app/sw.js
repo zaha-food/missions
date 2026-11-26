@@ -3,11 +3,11 @@
    Caches the shell so the app always starts; data is handled by the
    queue in app.js, not here. */
 
-const CACHE = 'missions-v35';
+const CACHE = 'missions-v36';
 const SHELL = [
   './',
   './index.html',
-  './app.js?v=33',
+  './app.js?v=34',
   './apple-touch-icon.png',
   './icon-512.png',
   './manifest.webmanifest',

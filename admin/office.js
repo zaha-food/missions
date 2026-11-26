@@ -69,7 +69,7 @@ async function viewTodayV2() {
         records(id,signed_at,was_late,minutes_late,steps_total,steps_done,staff(name))`)
       .eq('service_date', day).order('due_at'),
     db.rpc('board_done', { p_date: day }),
-    db.from('corrective_actions').select(`id,verified_at,verify_due_at,created_at,action_taken,
+    db.from('corrective_actions').select(`id,verified_at,verify_due_at,created_at,action_taken,escalated_at,recheck_value_c,recheck_at,closed_at,
         readings(value_c,units(name,limit_c)),records(staff(name),occurrences(station_id))`)
       .order('created_at', { ascending: false }).limit(40),
     doorsOpen()
@@ -94,10 +94,15 @@ async function viewTodayV2() {
 
   // Needs you — everything that wants a decision, across all sides
   const needs = [];
-  (cas || []).filter(c => !c.verified_at && (c.created_at || '').slice(0, 10) === day).forEach(c => {
+  // out-of-range readings still open (same 24 hours the iPad shows)
+  const since = Date.now() - 24 * 3600e3;
+  (cas || []).filter(c => !c.verified_at && !c.closed_at && new Date(fixIso(c.created_at)).getTime() > since).forEach(c => {
     const u = c.readings?.units;
-    needs.push({ cls: 'fail', text: `${u ? u.name : 'A reading'} was ${c.readings?.value_c}°C (limit ${u ? u.limit_c : '?'}°C)${c.action_taken ? ' — ' + c.action_taken : ''}`,
-      who: c.records?.staff?.name || '', tag: 'Re-check by ' + hhmm(c.verify_due_at) });
+    needs.push({ cls: 'fail', ca: c.id,
+      text: `${u ? u.name : 'A reading'} was ${c.readings?.value_c}°C (limit ${u ? u.limit_c : '?'}°C)${c.action_taken ? ' — ' + c.action_taken : ''}`
+        + (c.escalated_at ? ` · STILL ${c.recheck_value_c}°C at ${hhmm(c.recheck_at)}` : ''),
+      who: c.records?.staff?.name || '',
+      tag: c.escalated_at ? 'Decide · Close' : (c.verify_due_at ? 'Re-check by ' + hhmm(c.verify_due_at) : 'Re-check') + ' · Close' });
   });
   list.forEach(o => {
     const s = stateOf(o), stn = STATIONS.find(x => x.id === o.station_id);
@@ -141,7 +146,7 @@ async function viewTodayV2() {
       · live, updated ${hhmm(new Date().toISOString())}</p>
     <div class="needs ${needs.length ? '' : 'calm'}">
       <div class="needsh">${needs.length ? 'Needs you · ' + needs.length : 'Nothing needs you right now'}</div>
-      ${needs.map(n => `<button class="needrow ${n.cls}" ${n.occ ? `data-occ="${n.occ}"` : ''}>
+      ${needs.map(n => `<button class="needrow ${n.cls}" ${n.occ ? `data-occ="${n.occ}"` : ''} ${n.ca ? `data-ca="${n.ca}"` : ''}>
           <span class="dot ${n.cls}"></span><span class="rn">${esc(n.text)}</span>
           ${n.who ? `<span class="rm">${esc(n.who)}</span>` : ''}<span class="chip ${n.cls}">${esc(n.tag)}</span></button>`).join('')}
     </div>
@@ -155,6 +160,15 @@ async function viewTodayV2() {
 
   m.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { TODAY_TAB = b.dataset.side; viewTodayV2(); });
   m.querySelectorAll('[data-occ]').forEach(b => b.onclick = () => openRecord(b.dataset.occ));
+  // a manager closes an out-of-range reading with what was decided
+  m.querySelectorAll('[data-ca]').forEach(b => b.onclick = async () => {
+    const note = prompt('Close this — what was decided?\n(e.g. "Fridge out of use, food moved, engineer booked Thursday")', '');
+    if (note === null) return;
+    if (!note.trim()) return alert('Write what was decided, so the record shows it.');
+    const { data, error } = await db.rpc('close_corrective', { p_ca: b.dataset.ca, p_note: note.trim() });
+    if (error || !data?.ok) return alert('Could not close it: ' + (error ? error.message : data.error));
+    viewTodayV2();
+  });
 
   // live: refresh every minute while Today is open and nothing is on top
   clearInterval(TODAY_TIMER);

@@ -148,6 +148,7 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 .signbtn.off{background:var(--mist);color:#9a9691;cursor:not-allowed}
 .unitrow.pass{border-color:var(--pass);border-left:4px solid var(--pass)}
 .unitrow.fail{border-color:var(--fail);border-left:4px solid var(--fail);background:#FBF0EF}
+.unitrow.fail .ulim{color:var(--fail);font-weight:600}
 .unitrow.skip{border-left:4px solid var(--stone);background:#FAF9F7}
 .unitrow.skip .uname{color:#8a8681}
 .unitrow.skip .uval{color:#9a9691;font-size:14px;font-weight:400}
@@ -434,6 +435,19 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 /* who does it — blue for Lead guide, green for Guide (a brighter green
    than the dark "done" green). Late and missed stay red and win. */
 :root{--lead:#2B63B8;--guide:#3A9D4F}
+/* re-checks: pinned to the top of the board until closed */
+.rcbar{display:flex;flex-direction:column;gap:6px;margin-top:9px}
+.rcrow{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:#fff;border:2px solid var(--fail);border-left:8px solid var(--fail);padding:10px 14px;font:inherit;color:var(--ink,#222);cursor:pointer}
+.rcrow.late{background:var(--fail);color:#fff}
+.rct{flex:1;display:flex;flex-direction:column;gap:2px}
+.rct b{font-size:16px;font-weight:700}
+.rct i{font-style:normal;font-size:13px;opacity:.85}
+.rcwhen{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;padding:7px 11px;border:1.5px solid currentColor}
+/* a long list folded to one row */
+.foldrow{display:flex;justify-content:space-between;align-items:center;width:100%;background:#fff;border:1.5px dashed #b9b4ac;padding:13px 16px;font:inherit;font-size:15px;color:#222;cursor:pointer;text-align:left}
+.foldrow b{font-size:13px;font-weight:700;letter-spacing:.04em}
+.foldrow.done{border-style:solid;border-color:var(--pass);color:var(--pass)}
+.foldbtn{display:block;margin:0 0 6px auto;background:none;border:0;font:inherit;font-size:13px;font-weight:700;color:#5c5955;padding:6px 2px;cursor:pointer}
 .bytag{display:inline-block;white-space:nowrap;margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.1em;
   text-transform:uppercase;padding:3px 7px;color:#fff;vertical-align:middle}
 .jtop .bytag,.focus .jtop .bytag{font-size:10px;font-weight:700;color:#fff}
@@ -532,6 +546,6 @@ button{font-family:inherit;-webkit-tap-highlight-color:rgba(194,75,58,.18)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
-<script src="app.js?v=33"></script>
+<script src="app.js?v=34"></script>
 </body>
 </html>
